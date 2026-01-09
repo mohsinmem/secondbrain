@@ -82,8 +82,14 @@ export async function POST(request: NextRequest) {
         date_range_start: date_range_start ? new Date(date_range_start).toISOString() : null,
         date_range_end: date_range_end ? new Date(date_range_end).toISOString() : null,
         message_count: Number.isFinite(message_count as any) ? message_count : null,
+
+        // ✅ REQUIRED by DB (NOT NULL)
+        source_type: 'manual',
+
+        // optional but safe
+        source_metadata: { uploaded_filename: file.name },
+
         status: 'unprocessed',
-        // keep existing legacy fields if your table still expects them
         title: source_filename,
         conversation_date: date_range_start ? new Date(date_range_start).toISOString() : null,
         is_processed: false
