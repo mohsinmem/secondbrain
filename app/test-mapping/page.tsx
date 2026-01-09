@@ -4,7 +4,9 @@ import { useState, useEffect } from 'react';
 //import { createClientSupabaseClient } from '@/lib/supabase/client';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+// import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+
 
 export default function TestMappingPage() {
   const [conversations, setConversations] = useState<any[]>([]);
@@ -100,9 +102,10 @@ export default function TestMappingPage() {
                       <CardTitle className="text-lg">
                         {conv.platform} • {conv.participants?.join(', ') || 'Unknown'}
                       </CardTitle>
-                      <CardDescription>
+                    <p className="text-sm text-muted-foreground">
                         {new Date(conv.created_at).toLocaleDateString()} • Status: {conv.status}
-                      </CardDescription>
+                    </p>
+
                     </div>
                     <Button
                       onClick={() => handleMap(conv.id)}
