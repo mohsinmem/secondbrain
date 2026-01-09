@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { createClientSupabaseClient } from '@/lib/supabase/client';
+//import { createClientSupabaseClient } from '@/lib/supabase/client';
+import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -11,7 +12,9 @@ export default function TestMappingPage() {
   const [mapResults, setMapResults] = useState<Record<string, any>>({});
   const [mapLoading, setMapLoading] = useState<Record<string, boolean>>({});
 
-  const supabase = createClientSupabaseClient();
+//   const supabase = createClientSupabaseClient();
+    const supabase = createClient();
+
 
   // Load conversations on mount
   useEffect(() => {
