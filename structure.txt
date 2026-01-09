@@ -1,0 +1,53 @@
+aferr-secondbrain/
+├── .env.local
+├── .gitignore
+├── package.json
+├── tsconfig.json
+├── next.config.js
+├── tailwind.config.ts
+├── postcss.config.js
+├── app/
+│   ├── layout.tsx
+│   ├── page.tsx
+│   ├── globals.css
+│   ├── auth/
+│   │   ├── login/
+│   │   │   └── page.tsx
+│   │   ├── signup/
+│   │   │   └── page.tsx
+│   │   └── callback/
+│   │       └── route.ts
+│   ├── contacts/
+│   │   ├── page.tsx
+│   │   ├── [id]/
+│   │   │   └── page.tsx
+│   │   └── new/
+│   │       └── page.tsx
+│   └── dashboard/
+│       └── page.tsx
+├── components/
+│   ├── ui/
+│   │   ├── button.tsx
+│   │   ├── input.tsx
+│   │   ├── select.tsx
+│   │   ├── label.tsx
+│   │   ├── card.tsx
+│   │   └── badge.tsx
+│   ├── auth/
+│   │   └── AuthProvider.tsx
+│   ├── contacts/
+│   │   ├── ContactList.tsx
+│   │   ├── ContactForm.tsx
+│   │   └── ContactFilters.tsx
+│   └── layout/
+│       ├── Header.tsx
+│       └── ProtectedRoute.tsx
+├── lib/
+│   ├── supabase/
+│   │   ├── client.ts
+│   │   ├── server.ts
+│   │   └── middleware.ts
+│   ├── types/
+│   │   └── database.types.ts
+│   └── utils.ts
+└── middleware.ts
