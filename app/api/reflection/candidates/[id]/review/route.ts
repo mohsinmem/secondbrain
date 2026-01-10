@@ -161,13 +161,17 @@ export async function POST(
           is_accepted: true,
         })
         .eq('id', candidateId);
-        const isElevated =
-        elevated === true ||
-        reflection_data?.elevated === true;
+      const user_notes: string | null = body?.user_notes ?? null;
+      const elevated: boolean = body?.elevated === true;
+      const reflection_data = body?.reflection_data ?? null;
 
       if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
     }
 
+    const isElevated =
+    elevated === true ||
+    reflection_data?.elevated === true;
+    
     // promote into signals
     // IMPORTANT: your signals table uses numeric confidence, trust_evidence TEXT, constraint_type enum.
     const { data: signal, error: signalError } = await supabase
