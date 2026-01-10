@@ -20,6 +20,9 @@ export async function POST(
     const review_notes: string | null = body?.review_notes ?? null;
     const deferred_until: string | null = body?.deferred_until ?? null;
     const updates: Record<string, any> | null = body?.updates ?? null;
+    const user_notes: string | null = body?.user_notes ?? null;
+    const elevated: boolean = body?.elevated === true;
+    const reflection_data = body?.reflection_data ?? null;
 
     if (!action || !['accept', 'reject', 'defer', 'edit'].includes(action)) {
       return NextResponse.json(
@@ -130,6 +133,19 @@ export async function POST(
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ data: { status: 'updated' } }, { status: 200 });
     }
+      // Idempotency: if already promoted, return existing signal
+      const { data: existingSignal, error: existingErr } = await supabase
+        .from('signals')
+        .select('id')
+        .eq('approved_from_candidate_id', candidateId)
+        .maybeSingle();
+
+      if (existingSignal?.id) {
+        return NextResponse.json(
+          { data: { status: 'accepted', signal_id: existingSignal.id, already_existed: true } },
+          { status: 200 }
+        );
+      }
 
     // accept
     // mark candidate accepted first
@@ -145,6 +161,9 @@ export async function POST(
           is_accepted: true,
         })
         .eq('id', candidateId);
+        const isElevated =
+        elevated === true ||
+        reflection_data?.elevated === true;
 
       if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
     }
@@ -166,7 +185,8 @@ export async function POST(
         extraction_method: 'reflection_engine_v0',
         constraint_type: candidate.constraint_type ?? 'none',
         trust_evidence: candidate.trust_evidence ?? candidate.trust_evidence_type ?? null,
-        action_required: !!candidate.action_suggested,
+        action_required: isElevated,
+        user_notes: user_notes,
         status: 'open',
 
         // provenance fields added by migration
