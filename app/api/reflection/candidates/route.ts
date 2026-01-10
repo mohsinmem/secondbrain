@@ -1,13 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
-const ALLOWED_REVIEW_STATUSES = new Set(['pending', 'accepted', 'rejected', 'deferred']);
+function jsonError(message: string, status: number) {
+  return NextResponse.json({ error: message }, { status });
+}
 
 /**
  * GET /api/reflection/candidates
  * Query:
  * - conversation_id (required)
  * - review_status (optional, default: 'pending')
+ *
+ * Deterministic ordering (v1):
+ * - created_at ASC
+ *
+ * (We can add segment_number ordering later; this is safe and stable for v1.)
  */
 export async function GET(request: NextRequest) {
   try {
@@ -18,26 +25,15 @@ export async function GET(request: NextRequest) {
       error: authError,
     } = await supabase.auth.getUser();
 
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    if (authError || !user) return jsonError('Unauthorized', 401);
 
     const sp = request.nextUrl.searchParams;
     const conversationId = sp.get('conversation_id');
-    const reviewStatus = (sp.get('review_status') ?? 'pending').toLowerCase();
+    const reviewStatus = sp.get('review_status') ?? 'pending';
 
-    if (!conversationId) {
-      return NextResponse.json({ error: 'conversation_id is required' }, { status: 400 });
-    }
+    if (!conversationId) return jsonError('conversation_id is required', 400);
 
-    if (!ALLOWED_REVIEW_STATUSES.has(reviewStatus)) {
-      return NextResponse.json(
-        { error: `Invalid review_status. Must be one of: ${Array.from(ALLOWED_REVIEW_STATUSES).join(', ')}` },
-        { status: 400 }
-      );
-    }
-
-    // Ownership check (conversation)
+    // Verify ownership of conversation
     const { data: convo, error: convoError } = await supabase
       .from('raw_conversations')
       .select('id')
@@ -45,11 +41,9 @@ export async function GET(request: NextRequest) {
       .eq('user_id', user.id)
       .single();
 
-    if (convoError || !convo) {
-      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
-    }
+    if (convoError || !convo) return jsonError('Conversation not found', 404);
 
-    // Deterministic ordering (v1): created_at ASC
+    // Fetch candidates
     const { data, error } = await supabase
       .from('signal_candidates')
       .select(`
@@ -63,25 +57,26 @@ export async function GET(request: NextRequest) {
         risk_of_misinterpretation,
         constraint_type,
         trust_evidence,
+        trust_evidence_type,
         action_suggested,
         related_themes,
         temporal_context,
         suggested_links,
+        source_conversation_id,
         source_excerpt,
         excerpt_location,
         segment_id,
-        source_conversation_id,
+        review_status,
+        deferred_until,
         created_at,
-        review_status
+        updated_at
       `)
       .eq('source_conversation_id', conversationId)
-      .eq('user_id', user.id) // defense-in-depth
+      .eq('user_id', user.id)                 // extra safety
       .eq('review_status', reviewStatus)
       .order('created_at', { ascending: true });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    if (error) return jsonError(error.message, 500);
 
     return NextResponse.json({ data: data ?? [] }, { status: 200 });
   } catch (e: any) {
