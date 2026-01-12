@@ -38,7 +38,6 @@ export async function GET(request: NextRequest) {
 
     if (convoError || !convo) return jsonError('Conversation not found', 404);
 
-    // IMPORTANT: do NOT select trust_evidence_type (doesn't exist)
     const { data, error } = await supabase
       .from('signal_candidates')
       .select(`
