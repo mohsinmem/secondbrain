@@ -10,11 +10,6 @@ function jsonError(message: string, status: number) {
  * Query:
  * - conversation_id (required)
  * - review_status (optional, default: 'pending')
- *
- * Deterministic ordering (v1):
- * - created_at ASC
- *
- * (We can add segment_number ordering later; this is safe and stable for v1.)
  */
 export async function GET(request: NextRequest) {
   try {
@@ -43,7 +38,7 @@ export async function GET(request: NextRequest) {
 
     if (convoError || !convo) return jsonError('Conversation not found', 404);
 
-    // Fetch candidates
+    // IMPORTANT: do NOT select trust_evidence_type (doesn't exist)
     const { data, error } = await supabase
       .from('signal_candidates')
       .select(`
@@ -57,7 +52,6 @@ export async function GET(request: NextRequest) {
         risk_of_misinterpretation,
         constraint_type,
         trust_evidence,
-        trust_evidence_type,
         action_suggested,
         related_themes,
         temporal_context,
@@ -72,7 +66,7 @@ export async function GET(request: NextRequest) {
         updated_at
       `)
       .eq('source_conversation_id', conversationId)
-      .eq('user_id', user.id)                 // extra safety
+      .eq('user_id', user.id)
       .eq('review_status', reviewStatus)
       .order('created_at', { ascending: true });
 

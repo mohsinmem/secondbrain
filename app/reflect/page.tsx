@@ -16,7 +16,6 @@ interface Candidate {
   risk_of_misinterpretation: string | null;
   constraint_type: string | null;
   trust_evidence: string | null;
-  trust_evidence_type?: string | null;
   action_suggested: boolean;
   related_themes: string[] | null;
   temporal_context: string | null;
@@ -555,12 +554,6 @@ function ReflectPageContent() {
               <p>
                 <span className="font-semibold">Constraint:</span>{' '}
                 {currentCandidate.constraint_type}
-              </p>
-            )}
-            {(currentCandidate.trust_evidence || currentCandidate.trust_evidence_type) && (
-              <p>
-                <span className="font-semibold">Trust evidence:</span>{' '}
-                {currentCandidate.trust_evidence || currentCandidate.trust_evidence_type}
               </p>
             )}
             <p className="text-xs text-gray-400">

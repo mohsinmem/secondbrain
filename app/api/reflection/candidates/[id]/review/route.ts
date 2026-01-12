@@ -7,25 +7,6 @@ function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
 }
 
-/**
- * POST /api/reflection/candidates/[id]/review
- * Actions:
- * - accept: promotes candidate -> signals
- * - reject: marks candidate rejected
- * - defer: marks candidate deferred until date
- * - edit: updates safe fields on candidate
- *
- * Body:
- * {
- *   action: 'accept'|'reject'|'defer'|'edit',
- *   review_notes?: string,
- *   user_notes?: string,
- *   elevated?: boolean,
- *   reflection_data?: { elevated?: boolean, ... },
- *   deferred_until?: string,
- *   updates?: { ... }
- * }
- */
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -41,7 +22,6 @@ export async function POST(
     if (authError || !user) return jsonError('Unauthorized', 401);
 
     const candidateId = params.id;
-
     const body = await request.json().catch(() => ({}));
 
     const action: Action | undefined = body?.action;
@@ -57,7 +37,7 @@ export async function POST(
       return jsonError('Invalid action. Must be: accept, reject, defer, edit', 400);
     }
 
-    // Fetch candidate and verify ownership (schema includes signal_candidates.user_id)
+    // Fetch candidate and verify ownership (signal_candidates.user_id exists in your schema)
     const { data: candidate, error: fetchError } = await supabase
       .from('signal_candidates')
       .select('*')
@@ -69,18 +49,13 @@ export async function POST(
 
     const now = new Date().toISOString();
 
-    // ACCEPT: idempotency check MUST happen before review-status guard
+    // ACCEPT: idempotency check before any guard
     if (action === 'accept') {
-      const { data: existingSignal, error: existingErr } = await supabase
+      const { data: existingSignal } = await supabase
         .from('signals')
         .select('id')
         .eq('approved_from_candidate_id', candidateId)
         .maybeSingle();
-
-      if (existingErr) {
-        // Not fatal; continue to attempt accept
-        console.warn('Idempotency check failed:', existingErr.message);
-      }
 
       if (existingSignal?.id) {
         return NextResponse.json(
@@ -104,7 +79,6 @@ export async function POST(
       }
     }
 
-    // REJECT
     if (action === 'reject') {
       const { error } = await supabase
         .from('signal_candidates')
@@ -124,7 +98,6 @@ export async function POST(
       return NextResponse.json({ data: { status: 'rejected' } }, { status: 200 });
     }
 
-    // DEFER
     if (action === 'defer') {
       if (!deferred_until) return jsonError('deferred_until required for defer action', 400);
 
@@ -150,13 +123,11 @@ export async function POST(
       );
     }
 
-    // EDIT
     if (action === 'edit') {
       if (!updates || typeof updates !== 'object' || Object.keys(updates).length === 0) {
         return jsonError('updates object required', 400);
       }
 
-      // Safe editable fields only
       const allowed = new Set([
         'label',
         'description',
@@ -196,12 +167,10 @@ export async function POST(
       return NextResponse.json({ data: { status: 'updated' } }, { status: 200 });
     }
 
-    // ACCEPT (promote to signals)
-    // IMPORTANT: action_required determined ONLY from user gesture flags
-    const isElevated =
-      elevatedFlag === true || reflection_data?.elevated === true;
+    // ACCEPT (promote)
+    const isElevated = elevatedFlag === true || reflection_data?.elevated === true;
 
-    // 1) Create signal FIRST (so failure doesn't mutate candidate; safe retry)
+    // 1) Create signal FIRST
     const { data: signal, error: signalError } = await supabase
       .from('signals')
       .insert({
@@ -209,20 +178,19 @@ export async function POST(
         signal_type: candidate.signal_type,
         label: candidate.label,
         description: candidate.description ?? null,
-
         confidence: candidate.confidence ?? null,
 
         extracted_at: now,
         extraction_method: 'reflection_engine_v0',
         constraint_type: candidate.constraint_type ?? 'none',
-        trust_evidence: candidate.trust_evidence ?? candidate.trust_evidence_type ?? null,
+
+        // IMPORTANT: only trust_evidence exists
+        trust_evidence: candidate.trust_evidence ?? null,
 
         action_required: isElevated,
         user_notes: user_notes,
-
         status: 'open',
 
-        // provenance
         source_conversation_id: candidate.source_conversation_id ?? null,
         source_segment_id: candidate.segment_id ?? null,
         source_excerpt: candidate.source_excerpt ?? null,
@@ -236,7 +204,7 @@ export async function POST(
       return jsonError(signalError?.message ?? 'Failed to create signal', 500);
     }
 
-    // 2) Update candidate -> accepted (non-fatal if it fails; idempotency protects)
+    // 2) Mark candidate accepted (non-fatal if fails)
     const { error: updErr } = await supabase
       .from('signal_candidates')
       .update({
@@ -250,18 +218,10 @@ export async function POST(
       .eq('id', candidateId)
       .eq('user_id', user.id);
 
-    if (updErr) {
-      console.warn('Candidate update failed after signal creation:', updErr.message);
-    }
+    if (updErr) console.warn('Candidate update failed after signal creation:', updErr.message);
 
     return NextResponse.json(
-      {
-        data: {
-          status: 'accepted',
-          signal_id: signal.id,
-          already_existed: false,
-        },
-      },
+      { data: { status: 'accepted', signal_id: signal.id, already_existed: false } },
       { status: 201 }
     );
   } catch (e: any) {
