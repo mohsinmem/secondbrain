@@ -12,7 +12,12 @@ function validateAIResponse(response: any): ValidationResult {
   const errors: string[] = [];
 
   if (typeof response !== 'object' || response === null) {
-    return { valid: false, errors: ['Response must be a JSON object'], status: 'failed', errorType: 'invalid_json' };
+    return {
+      valid: false,
+      errors: ['Response must be a JSON object'],
+      status: 'failed',
+      errorType: 'invalid_json',
+    };
   }
 
   if (!response.status || !['success', 'partial', 'failed'].includes(response.status)) {
@@ -27,7 +32,7 @@ function validateAIResponse(response: any): ValidationResult {
       'signal_type',
       'label',
       'description',
-      'confidence_level', // IMPORTANT: we use confidence_level in DB
+      'confidence_level',
       'excerpt',
       'risk_of_misinterpretation',
     ];
@@ -76,9 +81,273 @@ function validateAIResponse(response: any): ValidationResult {
   return { valid: true, errors: [], status: 'success' };
 }
 
+function clampText(input: string, maxLen: number) {
+  const s = (input ?? '').trim();
+  return s.length > maxLen ? s.slice(0, maxLen - 1).trimEnd() + '…' : s;
+}
+
+/**
+ * Extremely simple WhatsApp-ish line parser:
+ * Example:
+ * "08/09/17, 9:12 am - Joel: Yes we can..."
+ */
+function parseTranscriptLines(text: string) {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+
+  const parsed: Array<{ speaker?: string; message: string; raw: string }> = [];
+
+  for (const raw of lines) {
+    const m = raw.match(/^\d{1,2}\/\d{1,2}\/\d{2,4},?\s.*?\s-\s([^:]+):\s(.+)$/);
+    if (m) {
+      parsed.push({ speaker: m[1]?.trim(), message: m[2]?.trim(), raw });
+      continue;
+    }
+    // fallback: "Name: message"
+    const m2 = raw.match(/^([^:]{2,40}):\s(.+)$/);
+    if (m2) {
+      parsed.push({ speaker: m2[1]?.trim(), message: m2[2]?.trim(), raw });
+      continue;
+    }
+    parsed.push({ message: raw, raw });
+  }
+
+  return parsed;
+}
+
+type CandidateOut = {
+  signal_type: 'pattern' | 'opportunity' | 'warning' | 'insight' | 'promise';
+  label: string;
+  description: string;
+  confidence_level: 'explicit' | 'inferred';
+  excerpt: string;
+  excerpt_location?: string | null;
+  risk_of_misinterpretation: 'low' | 'medium' | 'high';
+  constraint_type?: string | null;
+  trust_evidence?: string | null;
+  action_suggested?: boolean;
+  related_themes?: string[] | null;
+  temporal_context?: string | null;
+  suggested_links?: any;
+};
+
+function makeCandidate(partial: Partial<CandidateOut>): CandidateOut {
+  // hard defaults that satisfy validation
+  const excerpt = (partial.excerpt ?? '').trim();
+  const label = clampText(partial.label ?? 'Untitled signal', 100);
+  const description = clampText(partial.description ?? 'Candidate extracted from conversation context.', 500);
+
+  return {
+    signal_type: partial.signal_type ?? 'insight',
+    label: label.length < 5 ? 'Untitled signal' : label,
+    description: description.length < 10 ? 'Candidate extracted from conversation context.' : description,
+    confidence_level: partial.confidence_level ?? 'inferred',
+    excerpt: excerpt.length ? excerpt : clampText(partial.description ?? 'Excerpt unavailable', 200),
+    excerpt_location: partial.excerpt_location ?? null,
+    risk_of_misinterpretation: partial.risk_of_misinterpretation ?? 'medium',
+    constraint_type: partial.constraint_type ?? 'none',
+    trust_evidence: partial.trust_evidence ?? null,
+    action_suggested: partial.action_suggested ?? false,
+    related_themes: partial.related_themes ?? null,
+    temporal_context: partial.temporal_context ?? null,
+    suggested_links: partial.suggested_links ?? null,
+  };
+}
+
+/**
+ * v0 deterministic extractor:
+ * - Produces reviewable candidates without calling Claude yet
+ * - Goal: 8–15 candidates for normal transcripts
+ */
+function heuristicExtract(segmentText: string): CandidateOut[] {
+  const parsed = parseTranscriptLines(segmentText);
+  const candidates: CandidateOut[] = [];
+
+  const pushUnique = (c: CandidateOut) => {
+    const key = (c.label + '|' + c.excerpt).toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push(c);
+  };
+
+  const seen = new Set<string>();
+
+  // Helpers: detect intent
+  const isQuestion = (s: string) => /\?\s*$/.test(s) || /\b(can|could|would|should|shall)\b/i.test(s);
+  const isCommitment = (s: string) => /\b(i('| a)?ll|i will|we will|let's|lets|sure|yes)\b/i.test(s);
+  const isScheduling = (s: string) => /\b(am|pm|tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday|at\s\d{1,2}|\d{1,2}:\d{2})\b/i.test(s);
+  const isFollowUp = (s: string) => /\b(follow up|connect|call|meet|sync|quick chat|catch up)\b/i.test(s);
+  const isDecisionOrNext = (s: string) => /\b(next step|we should|we need|plan|proceed|move ahead|start)\b/i.test(s);
+  const isRiskOrBlocker = (s: string) => /\b(blocked|issue|problem|concern|risk|stuck|can't)\b/i.test(s);
+
+  // Use the first ~60 meaningful messages
+  const top = parsed.slice(0, 80);
+
+  // 1) Scheduling / coordination candidates
+  for (const item of top) {
+    const msg = item.message || '';
+    if (msg.length < 6) continue;
+
+    if (isScheduling(msg)) {
+      pushUnique(
+        makeCandidate({
+          signal_type: 'opportunity',
+          label: 'Scheduling / coordination',
+          description: 'Conversation includes time coordination. Capture scheduling intent and next-step alignment.',
+          confidence_level: 'explicit',
+          excerpt: clampText(item.raw, 220),
+          risk_of_misinterpretation: 'low',
+          trust_evidence: item.speaker ? `Message by ${item.speaker}` : null,
+          action_suggested: true,
+          related_themes: ['scheduling', 'coordination'],
+        })
+      );
+    }
+  }
+
+  // 2) Follow-up / relationship continuity
+  for (const item of top) {
+    const msg = item.message || '';
+    if (msg.length < 6) continue;
+
+    if (isFollowUp(msg)) {
+      pushUnique(
+        makeCandidate({
+          signal_type: 'pattern',
+          label: 'Follow-up loop',
+          description: 'There is an explicit follow-up loop (connect/sync/call) indicating an open thread that should be tracked.',
+          confidence_level: 'explicit',
+          excerpt: clampText(item.raw, 220),
+          risk_of_misinterpretation: 'low',
+          trust_evidence: item.speaker ? `Message by ${item.speaker}` : null,
+          action_suggested: true,
+          related_themes: ['follow-up', 'relationship'],
+        })
+      );
+    }
+  }
+
+  // 3) Questions / information requests (potential open loops)
+  for (const item of top) {
+    const msg = item.message || '';
+    if (msg.length < 10) continue;
+
+    if (isQuestion(msg)) {
+      pushUnique(
+        makeCandidate({
+          signal_type: 'insight',
+          label: 'Open question / request',
+          description: 'A direct question or request appears; this may represent an unresolved loop or dependency.',
+          confidence_level: 'explicit',
+          excerpt: clampText(item.raw, 220),
+          risk_of_misinterpretation: 'medium',
+          trust_evidence: item.speaker ? `Message by ${item.speaker}` : null,
+          action_suggested: true,
+          related_themes: ['open-loop'],
+        })
+      );
+    }
+  }
+
+  // 4) Commitments / promises
+  for (const item of top) {
+    const msg = item.message || '';
+    if (msg.length < 8) continue;
+
+    if (isCommitment(msg) && (isFollowUp(msg) || isScheduling(msg) || isDecisionOrNext(msg))) {
+      pushUnique(
+        makeCandidate({
+          signal_type: 'promise',
+          label: 'Commitment made',
+          description: 'A commitment/affirmation is present. Track as a promise or agreed next action.',
+          confidence_level: 'explicit',
+          excerpt: clampText(item.raw, 220),
+          risk_of_misinterpretation: 'low',
+          trust_evidence: item.speaker ? `Message by ${item.speaker}` : null,
+          action_suggested: true,
+          related_themes: ['commitment', 'next-steps'],
+        })
+      );
+    }
+  }
+
+  // 5) Decisions / next steps / intents
+  for (const item of top) {
+    const msg = item.message || '';
+    if (msg.length < 10) continue;
+
+    if (isDecisionOrNext(msg)) {
+      pushUnique(
+        makeCandidate({
+          signal_type: 'opportunity',
+          label: 'Next-step intent',
+          description: 'A concrete next-step or intent is stated. This can be promoted into an actionable signal if important.',
+          confidence_level: 'explicit',
+          excerpt: clampText(item.raw, 220),
+          risk_of_misinterpretation: 'medium',
+          trust_evidence: item.speaker ? `Message by ${item.speaker}` : null,
+          action_suggested: true,
+          related_themes: ['planning', 'execution'],
+        })
+      );
+    }
+  }
+
+  // 6) Risks / blockers
+  for (const item of top) {
+    const msg = item.message || '';
+    if (msg.length < 10) continue;
+
+    if (isRiskOrBlocker(msg)) {
+      pushUnique(
+        makeCandidate({
+          signal_type: 'warning',
+          label: 'Potential blocker',
+          description: 'A blocker/concern is mentioned. Track as a warning signal to revisit.',
+          confidence_level: 'explicit',
+          excerpt: clampText(item.raw, 220),
+          risk_of_misinterpretation: 'medium',
+          trust_evidence: item.speaker ? `Message by ${item.speaker}` : null,
+          action_suggested: true,
+          related_themes: ['risk', 'blocker'],
+        })
+      );
+    }
+  }
+
+  // 7) If still too few, add “context anchor” candidates from representative lines
+  if (candidates.length < 8) {
+    const anchors = top
+      .filter((x) => (x.message || '').length > 25)
+      .slice(0, 8 - candidates.length);
+
+    for (const a of anchors) {
+      pushUnique(
+        makeCandidate({
+          signal_type: 'insight',
+          label: 'Context anchor',
+          description: 'General context captured for review. Use accept/reject to keep only what matters.',
+          confidence_level: 'inferred',
+          excerpt: clampText(a.raw, 220),
+          risk_of_misinterpretation: 'high',
+          trust_evidence: a.speaker ? `Message by ${a.speaker}` : null,
+          action_suggested: false,
+          related_themes: ['context'],
+        })
+      );
+    }
+  }
+
+  // Cap to keep UI usable
+  return candidates.slice(0, 15);
+}
+
 /**
  * POST /api/reflection/segments/[id]/extract
- * v0: AI call is stubbed, but contract + audit + candidate insert is real.
+ * v0: deterministic extractor (no Claude yet) + audit + candidate insert.
+ *
+ * NOTE:
+ * We allow re-run if extraction_status is 'failed' OR 'no_signals_found'.
+ * We block only if 'processing' or 'completed'.
  */
 export async function POST(
   request: NextRequest,
@@ -103,28 +372,29 @@ export async function POST(
       return NextResponse.json({ error: 'Segment not found' }, { status: 404 });
     }
 
-    if (segment.extraction_status === 'completed' || segment.extraction_status === 'processing') {
+    const status = segment.extraction_status ?? 'pending';
+    if (status === 'completed' || status === 'processing') {
       return NextResponse.json({ error: 'Segment already processed or processing' }, { status: 409 });
     }
 
+    // Mark processing
     await supabase
       .from('conversation_segments')
       .update({ extraction_status: 'processing' })
-      .eq('id', segmentId);
+      .eq('id', segmentId)
+      .eq('user_id', user.id);
 
     const body = await request.json().catch(() => ({}));
-    const model = body?.model || 'claude-sonnet-4';
+    const model = body?.model || 'heuristic-v0';
 
-    // =========================
-    // v0 STUB AI RESPONSE
-    // =========================
     const start = Date.now();
 
-    // This is where your actual Claude call will go later.
-    // For now, we return zero candidates but a valid contract.
+    // === v0 deterministic extraction ===
+    const extracted = heuristicExtract(segment.segment_text || '');
+
     const aiResponse = {
       status: 'success',
-      candidates: [],
+      candidates: extracted,
       errors: [],
     };
 
@@ -155,7 +425,8 @@ export async function POST(
       await supabase
         .from('conversation_segments')
         .update({ extraction_status: 'failed' })
-        .eq('id', segmentId);
+        .eq('id', segmentId)
+        .eq('user_id', user.id);
 
       return NextResponse.json({ error: 'Failed to record AI run' }, { status: 500 });
     }
@@ -165,7 +436,8 @@ export async function POST(
       await supabase
         .from('conversation_segments')
         .update({ extraction_status: 'failed' })
-        .eq('id', segmentId);
+        .eq('id', segmentId)
+        .eq('user_id', user.id);
 
       return NextResponse.json(
         { error: 'AI extraction failed validation', details: validation.errors, ai_run_id: aiRun.id },
@@ -180,7 +452,8 @@ export async function POST(
       await supabase
         .from('conversation_segments')
         .update({ extraction_status: 'no_signals_found' })
-        .eq('id', segmentId);
+        .eq('id', segmentId)
+        .eq('user_id', user.id);
 
       return NextResponse.json(
         { data: { ai_run: aiRun, candidates_generated: 0 } },
@@ -188,20 +461,22 @@ export async function POST(
       );
     }
 
+    // IMPORTANT:
+    // Your schema uses:
+    // - signal_candidates.source_conversation_id (NOT conversation_id)
+    // - signal_candidates.user_id exists
     const rows = candidates.map((c: any) => ({
       user_id: user.id,
       signal_type: c.signal_type,
       label: c.label,
       description: c.description ?? null,
 
-      // IMPORTANT: existing table has numeric confidence; we keep it optional (null)
+      // numeric confidence (optional for now)
       confidence: null,
 
-      // Existing provenance fields in your schema:
       source_conversation_id: segment.conversation_id,
       source_excerpt: c.excerpt,
 
-      // New v0 fields:
       segment_id: segmentId,
       ai_run_id: aiRun.id,
       confidence_level: c.confidence_level,
@@ -226,7 +501,8 @@ export async function POST(
       await supabase
         .from('conversation_segments')
         .update({ extraction_status: 'failed' })
-        .eq('id', segmentId);
+        .eq('id', segmentId)
+        .eq('user_id', user.id);
 
       return NextResponse.json(
         { error: insertCandidatesError.message, ai_run_id: aiRun.id },
@@ -237,7 +513,8 @@ export async function POST(
     await supabase
       .from('conversation_segments')
       .update({ extraction_status: 'completed' })
-      .eq('id', segmentId);
+      .eq('id', segmentId)
+      .eq('user_id', user.id);
 
     return NextResponse.json(
       { data: { ai_run: aiRun, candidates_generated: candidates.length } },
