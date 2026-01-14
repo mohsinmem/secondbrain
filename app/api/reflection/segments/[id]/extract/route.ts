@@ -353,13 +353,18 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const segmentId = params.id;
+  console.log('[Extract] Request received for segment:', segmentId);
+
   try {
     const supabase = await createServerSupabaseClient();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const segmentId = params.id;
+    if (authError || !user) {
+      console.log('[Extract] Auth failed:', authError?.message);
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    console.log('[Extract] User authenticated:', user.id);
 
     const { data: segment, error: fetchError } = await supabase
       .from('conversation_segments')
@@ -369,11 +374,14 @@ export async function POST(
       .single();
 
     if (fetchError || !segment) {
+      console.log('[Extract] Segment not found or error:', fetchError?.message);
       return NextResponse.json({ error: 'Segment not found' }, { status: 404 });
     }
+    console.log('[Extract] Segment found, status:', segment.extraction_status, 'len:', segment.segment_text?.length);
 
     const status = segment.extraction_status ?? 'pending';
     if (status === 'completed' || status === 'processing') {
+      console.log('[Extract] Segment already processed, blocking re-run');
       return NextResponse.json({ error: 'Segment already processed or processing' }, { status: 409 });
     }
 
@@ -384,8 +392,17 @@ export async function POST(
       .eq('id', segmentId)
       .eq('user_id', user.id);
 
-    const body = await request.json().catch(() => ({}));
-    const model = body?.model || 'heuristic-v0';
+    console.log('[Extract] Set status to processing');
+
+    let body = {};
+    try {
+      body = await request.json();
+    } catch (e) {
+      console.log('[Extract] No JSON body or invalid');
+    }
+    const model = (body as any)?.model || 'heuristic-v0';
+
+    console.log('[Extract] Model:', model);
 
     const start = Date.now();
 
@@ -422,6 +439,7 @@ export async function POST(
       .single();
 
     if (aiRunError || !aiRun) {
+      console.log('[Extract] Failed to record AI run:', aiRunError?.message);
       await supabase
         .from('conversation_segments')
         .update({ extraction_status: 'failed' })
@@ -433,6 +451,7 @@ export async function POST(
 
     // If invalid, fail-closed
     if (!validation.valid) {
+      console.log('[Extract] Validation failed:', validation.errors);
       await supabase
         .from('conversation_segments')
         .update({ extraction_status: 'failed' })
@@ -449,6 +468,7 @@ export async function POST(
     const candidates = Array.isArray(aiResponse.candidates) ? aiResponse.candidates : [];
 
     if (candidates.length === 0) {
+      console.log('[Extract] No candidates found, marking no_signals_found');
       await supabase
         .from('conversation_segments')
         .update({ extraction_status: 'no_signals_found' })
@@ -461,10 +481,28 @@ export async function POST(
       );
     }
 
-    // IMPORTANT:
-    // Your schema uses:
-    // - signal_candidates.source_conversation_id (NOT conversation_id)
-    // - signal_candidates.user_id exists
+    // CHECK IDEMPOTENCY: Delete existing candidates for this segment before inserting new ones
+    console.log('[Extract] Clearing existing candidates for segment:', segmentId);
+    const { error: deleteError } = await supabase
+      .from('signal_candidates')
+      .delete()
+      .eq('segment_id', segmentId)
+      .eq('user_id', user.id); // Safety check
+
+    if (deleteError) {
+      console.log('[Extract] Failed to clear existing candidates:', deleteError.message);
+      // We continue? Or fail? Fail safe is better.
+      await supabase
+        .from('conversation_segments')
+        .update({ extraction_status: 'failed' })
+        .eq('id', segmentId)
+        .eq('user.id', user.id);
+
+      return NextResponse.json({ error: 'Failed to clear old candidates' }, { status: 500 });
+    }
+
+    // Prepare rows
+    console.log('[Extract] Inserting candidates:', candidates.length);
     const rows = candidates.map((c: any) => ({
       user_id: user.id,
       signal_type: c.signal_type,
@@ -498,6 +536,7 @@ export async function POST(
       .insert(rows);
 
     if (insertCandidatesError) {
+      console.log('[Extract] Insert candidates failed:', insertCandidatesError.message);
       await supabase
         .from('conversation_segments')
         .update({ extraction_status: 'failed' })
@@ -510,6 +549,7 @@ export async function POST(
       );
     }
 
+    console.log('[Extract] Success. Marking completed.');
     await supabase
       .from('conversation_segments')
       .update({ extraction_status: 'completed' })
@@ -521,6 +561,7 @@ export async function POST(
       { status: 200 }
     );
   } catch (e: any) {
+    console.log('[Extract] Unexpected error:', e);
     return NextResponse.json({ error: e?.message ?? 'Unknown error' }, { status: 500 });
   }
 }
