@@ -45,6 +45,28 @@ export function ConversationInbox() {
   const [savedId, setSavedId] = useState<string | null>(null);
   const [savedTitle, setSavedTitle] = useState<string>('');
 
+  // File Upload Handler
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.type !== 'text/plain' && !file.name.endsWith('.txt')) {
+      setStatus('Please upload a .txt file.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result;
+      if (typeof text === 'string') {
+        setRawText(text);
+        setStatus(`Loaded file: ${file.name}`);
+      }
+    };
+    reader.onerror = () => setStatus('Failed to read file.');
+    reader.readAsText(file);
+  };
+
   const hasEnv = useMemo(() => {
     try {
       // If env vars are missing, createClient will throw.
@@ -149,7 +171,15 @@ export function ConversationInbox() {
           </div>
 
           <div>
-            <label className="text-sm font-medium">Conversation</label>
+            <div className="flex justify-between items-center mb-2">
+              <label className="text-sm font-medium">Conversation</label>
+              <input
+                type="file"
+                accept=".txt"
+                onChange={handleFileUpload}
+                className="text-xs text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+              />
+            </div>
             <Textarea
               className="mt-2 min-h-[260px]"
               value={rawText}
