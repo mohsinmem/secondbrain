@@ -28,6 +28,9 @@ interface Candidate {
   deferred_until: string | null;
   created_at: string;
   updated_at: string | null;
+  // New fields
+  why_surfaced: string | null;
+  ambiguity_note: string | null;
 }
 
 interface ReviewResponse {
@@ -76,17 +79,17 @@ type ReviewBody =
   | { action: 'reject'; review_notes?: string | null }
   | { action: 'defer'; deferred_until: string; review_notes?: string | null }
   | {
-      action: 'edit';
-      updates: { label?: string; description?: string };
-      review_notes?: string | null;
-    }
+    action: 'edit';
+    updates: { label?: string; description?: string };
+    review_notes?: string | null;
+  }
   | {
-      action: 'accept';
-      elevated?: boolean;
-      reflection_data?: { elevated?: boolean };
-      user_notes?: string | null;
-      review_notes?: string | null;
-    };
+    action: 'accept';
+    elevated?: boolean;
+    reflection_data?: { elevated?: boolean };
+    user_notes?: string | null;
+    review_notes?: string | null;
+  };
 
 async function apiReviewCandidate(
   candidateId: string,
@@ -144,6 +147,15 @@ function ReflectPageContent() {
   const [editModalOpen, setEditModalOpen] = useState<boolean>(false);
   const [editLabelDraft, setEditLabelDraft] = useState<string>('');
   const [editDescriptionDraft, setEditDescriptionDraft] = useState<string>('');
+
+  // Weighting State
+  const [wRelevance, setWRelevance] = useState<number>(3);
+  const [wImportance, setWImportance] = useState<number>(3);
+  const [wEnergy, setWEnergy] = useState<number>(0);
+  const [wConfidence, setWConfidence] = useState<string>('Med');
+  const [wTiming, setWTiming] = useState<string>('now');
+  const [wNotes, setWNotes] = useState<string>('');
+
 
   const currentCandidate = candidates[currentIndex] || null;
 
@@ -217,15 +229,15 @@ function ReflectPageContent() {
 
     const body: ReviewBody = elevated
       ? {
-          action: 'accept',
-          elevated: true,
-          reflection_data: { elevated: true },
-          user_notes: userNotes?.trim() ? userNotes.trim() : null,
-        }
+        action: 'accept',
+        elevated: true,
+        reflection_data: { elevated: true },
+        user_notes: userNotes?.trim() ? userNotes.trim() : null,
+      }
       : {
-          action: 'accept',
-          user_notes: userNotes?.trim() ? userNotes.trim() : null,
-        };
+        action: 'accept',
+        user_notes: userNotes?.trim() ? userNotes.trim() : null,
+      };
 
     const res = await apiReviewCandidate(currentCandidate.id, body);
 
@@ -311,6 +323,35 @@ function ReflectPageContent() {
     });
 
     setEditModalOpen(false);
+  };
+
+  const handleSaveWeights = async () => {
+    if (!currentCandidate || actionInFlight) return;
+    setActionInFlight(true);
+
+    const body = {
+      relevance: wRelevance,
+      importance: wImportance,
+      energy_impact: wEnergy,
+      confidence: wConfidence,
+      action_timing: wTiming,
+      notes: wNotes
+    };
+
+    const res = await fetch(`/api/reflection/candidates/${currentCandidate.id}/weight`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    setActionInFlight(false);
+
+    if (!res.ok) {
+      alert('Failed to save weights');
+      return;
+    }
+    // Optional: visual feedback
+    alert('Weights saved');
   };
 
   // --- Notes modal (supports both accept & elevate)
@@ -521,6 +562,20 @@ function ReflectPageContent() {
             </div>
           </div>
 
+          {/* New Provenance Fields */}
+          <div className="mb-4 space-y-2">
+            {currentCandidate.why_surfaced && (
+              <div className="text-xs bg-blue-50 p-2 rounded text-blue-800">
+                <span className="font-semibold">Why Surfaced:</span> {currentCandidate.why_surfaced}
+              </div>
+            )}
+            {currentCandidate.ambiguity_note && (
+              <div className="text-xs bg-yellow-50 p-2 rounded text-yellow-800">
+                <span className="font-semibold">Ambiguity:</span> {currentCandidate.ambiguity_note}
+              </div>
+            )}
+          </div>
+
           {currentCandidate.description && (
             <p className="text-gray-700 mb-4 whitespace-pre-wrap">
               {currentCandidate.description}
@@ -564,6 +619,50 @@ function ReflectPageContent() {
           {/* Gesture hint */}
           <div className="mb-4 text-xs text-gray-500">
             Swipe: Left=Reject • Right=Accept • Up=Elevate
+          </div>
+
+          {/* Validation + Weighting UI */}
+          <div className="mb-4 bg-gray-50 p-3 rounded border border-gray-200 text-sm">
+            <h3 className="font-semibold text-gray-700 mb-2">Meaning & Validation (User-only)</h3>
+            <div className="grid grid-cols-2 gap-3 mb-2">
+              <div>
+                <label className="block text-xs text-gray-500">Relevance (1-5)</label>
+                <input type="range" min="1" max="5" value={wRelevance} onChange={e => setWRelevance(Number(e.target.value))} className="w-full" />
+                <div className="text-center text-xs">{wRelevance}</div>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500">Importance (1-5)</label>
+                <input type="range" min="1" max="5" value={wImportance} onChange={e => setWImportance(Number(e.target.value))} className="w-full" />
+                <div className="text-center text-xs">{wImportance}</div>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500">Energy (-5 to +5)</label>
+                <input type="range" min="-5" max="5" value={wEnergy} onChange={e => setWEnergy(Number(e.target.value))} className="w-full" />
+                <div className="text-center text-xs">{wEnergy}</div>
+              </div>
+            </div>
+            <div className="flex gap-2 mb-2">
+              <select value={wConfidence} onChange={e => setWConfidence(e.target.value)} className="text-xs border rounded p-1">
+                <option value="Low">Low Confidence</option>
+                <option value="Med">Med Confidence</option>
+                <option value="High">High Confidence</option>
+              </select>
+              <select value={wTiming} onChange={e => setWTiming(e.target.value)} className="text-xs border rounded p-1">
+                <option value="now">Action: Now</option>
+                <option value="later">Action: Later</option>
+                <option value="no">Action: No</option>
+              </select>
+            </div>
+            <textarea
+              value={wNotes}
+              onChange={e => setWNotes(e.target.value)}
+              placeholder="Meaning notes..."
+              className="w-full text-xs border rounded p-1 mb-2"
+              rows={2}
+            />
+            <button onClick={handleSaveWeights} disabled={actionInFlight} className="w-full bg-gray-600 text-white py-1 rounded text-xs hover:bg-gray-700">
+              Save Weights (Does not move card)
+            </button>
           </div>
 
           {/* Controls */}

@@ -1,32 +1,164 @@
-import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 /**
- * POST /api/reflection/conversations/[id]/map
- * v0 stub: stores a deterministic "reflection_map" into raw_conversations.source_metadata
- *
- * Rules:
- * - Idempotent: if reflection_map exists, return it
- * - No AI calls yet
- * - Stores versioned payload for forward compatibility
+ * Conversation Map Structure
+ * Strictly structural/orientational. No ranking.
  */
+interface ConversationMapData {
+  participants: string[];
+  themes: string[];
+  phases: {
+    name: string;
+    summary: string;
+    line_start?: number;
+    line_end?: number;
+  }[];
+  signal_zones: {
+    phase_idx: number; // reference to phase array index
+    reason: string;
+  }[];
+  guardrails: string[];
+  readiness: {
+    quality: 'low' | 'medium' | 'high';
+    reason: string;
+  };
+  metadata?: {
+    length_chars: number;
+    message_count: number;
+    detected_language: string;
+  };
+}
+
+const FORBIDDEN_TERMS = ['rank', 'priority', 'score', 'urgent', 'importance', 'top insight', 'recommended action'];
+
+function validateMapResponse(data: any): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  // 1. Structure check
+  if (!data || typeof data !== 'object') {
+    return { valid: false, errors: ['Invalid JSON object'] };
+  }
+  if (!Array.isArray(data.participants)) errors.push('Missing participants array');
+  if (!Array.isArray(data.themes)) errors.push('Missing themes array');
+  if (!Array.isArray(data.phases)) errors.push('Missing phases array');
+  if (!Array.isArray(data.guardrails)) errors.push('Missing guardrails array');
+  if (!data.readiness || typeof data.readiness !== 'object') errors.push('Missing readiness object');
+
+  // 2. Forbidden Term Check (Recursive or string search)
+  const jsonString = JSON.stringify(data).toLowerCase();
+  for (const term of FORBIDDEN_TERMS) {
+    if (jsonString.includes(term)) {
+      errors.push(`Forbidden term detected: "${term}". AI ranking/scoring is not allowed.`);
+    }
+  }
+
+  // 3. Logic checks
+  if (data.readiness && !['low', 'medium', 'high'].includes(data.readiness.quality)) {
+    errors.push('Invalid readiness quality');
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Heuristic Mapper (v0 Placeholder for LLM)
+ * Extracts structure without interpretation.
+ */
+function heuristicMap(text: string): ConversationMapData {
+  const lines = text.split('\n').filter(l => l.trim());
+  const length = text.length;
+
+  // 1. Participants extraction (simple regex for "Name:")
+  const participants = new Set<string>();
+  const speakerRegex = /^([^:]{2,20}):\s/;
+  for (const line of lines.slice(0, 500)) { // Verify first 500 lines
+    const m = line.match(speakerRegex);
+    if (m) participants.add(m[1].trim());
+  }
+
+  // 2. Phases (Naive: split by thirds)
+  const totalLines = lines.length;
+  const third = Math.floor(totalLines / 3);
+  const phases = [
+    {
+      name: 'Opening / Context',
+      summary: 'Initial exchange and context setting.',
+      line_start: 1,
+      line_end: third
+    },
+    {
+      name: 'Core Discussion',
+      summary: 'Main exchange of information and points.',
+      line_start: third + 1,
+      line_end: third * 2
+    },
+    {
+      name: 'Closing / Next Steps',
+      summary: 'Wrap up and potential follow-ups.',
+      line_start: third * 2 + 1,
+      line_end: totalLines
+    }
+  ];
+
+  // 3. Themes (Naive: Keyword frequency or static for v0)
+  // In a real LLM run, this would be dynamic.
+  const themes = ['General Discussion'];
+  if (text.match(/schedule|time|meet/i)) themes.push('Scheduling');
+  if (text.match(/price|cost|budget/i)) themes.push('Financial');
+  if (text.match(/plan|strategy|roadmap/i)) themes.push('Strategy');
+
+  // 4. Signal Zones (Just point to the middle for now)
+  const signal_zones = [
+    { phase_idx: 1, reason: 'High density of discussion turns.' }
+  ];
+
+  // 5. Guardrails
+  const guardrails = ['Verify speaker identities (inferred from text).'];
+  if (participants.size === 0) guardrails.push('No clear speakers detected; transcript might be raw prose.');
+
+  // 6. Readiness
+  let quality: 'low' | 'medium' | 'high' = 'medium';
+  if (length < 100) quality = 'low';
+  if (participants.size > 1) quality = 'high';
+
+  return {
+    participants: Array.from(participants),
+    themes,
+    phases,
+    signal_zones,
+    guardrails,
+    readiness: {
+      quality,
+      reason: participants.size > 0 ? 'Speakers identified' : 'Unstructured text'
+    },
+    metadata: {
+      length_chars: length,
+      message_count: lines.length,
+      detected_language: 'en' // stub
+    }
+  };
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const conversationId = params.id;
+  console.log('[Map] Request received for conversation:', conversationId);
+
   try {
     const supabase = await createServerSupabaseClient();
-
     const { data: { user }, error: authError } = await supabase.auth.getUser();
+
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const conversationId = params.id;
-
+    // 1. Fetch Conversation
     const { data: conversation, error: fetchError } = await supabase
       .from('raw_conversations')
-      .select('id, user_id, raw_text, platform, participants, source_metadata')
+      .select('id, raw_text, user_id')
       .eq('id', conversationId)
       .eq('user_id', user.id)
       .single();
@@ -35,123 +167,69 @@ export async function POST(
       return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
     }
 
-    // Guard: too short to map
-    if (!conversation.raw_text || conversation.raw_text.trim().length < 50) {
-      return NextResponse.json({ error: 'Conversation text too short to map' }, { status: 400 });
-    }
+    const model = 'map-heuristic-v0';
+    const start = Date.now();
 
-    // Idempotency: return existing
-    const existing = conversation.source_metadata?.reflection_map;
-    if (existing) {
-      return NextResponse.json({
-        data: {
-          map: existing.map,
-          version: existing.version,
-          generated_at: existing.generated_at,
-          already_existed: true,
-        }
-      }, { status: 200 });
-    }
+    // 2. Generate Map (Logic)
+    const mapData = heuristicMap(conversation.raw_text || '');
+    const execMs = Date.now() - start;
 
-    const startTime = Date.now();
-    const stubMap = generateStubMap(
-      conversation.raw_text,
-      conversation.participants || [],
-      conversation.platform
-    );
-    const executionTime = Date.now() - startTime;
+    // 3. Validation (Fail-Closed)
+    const validation = validateMapResponse(mapData);
 
-    const reflectionMap = {
-      version: 'v0',
-      generated_at: new Date().toISOString(),
-      model: 'stub_v0',
-      execution_time_ms: executionTime,
-      map: stubMap
-    };
-
-    const updatedMetadata = {
-      ...(conversation.source_metadata || {}),
-      reflection_map: reflectionMap
-    };
-
-    // Return DB truth
-    const { data: updatedConversation, error: updateError } = await supabase
-      .from('raw_conversations')
-      .update({ source_metadata: updatedMetadata })
-      .eq('id', conversationId)
-      .select('source_metadata')
+    // 4. Audit Run
+    const { data: aiRun, error: aiRunError } = await supabase
+      .from('ai_runs')
+      .insert({
+        user_id: user.id,
+        conversation_id: conversationId,
+        model,
+        status: validation.valid ? 'success' : 'failed',
+        error_type: validation.valid ? null : 'forbidden_content',
+        error_details: validation.errors.join('; '),
+        raw_output: mapData,
+        execution_time_ms: execMs
+        // segment_id is null for conversation map
+      })
+      .select()
       .single();
 
-    if (updateError || !updatedConversation) {
+    if (aiRunError) {
+      console.error('[Map] Failed to log AI run', aiRunError);
+      return NextResponse.json({ error: 'Audit failure' }, { status: 500 });
+    }
+
+    if (!validation.valid) {
+      console.error('[Map] Validation failed (ranking/safety guard)', validation.errors);
       return NextResponse.json(
-        { error: updateError?.message || 'Failed to store map' },
-        { status: 500 }
+        { error: 'Map generation rejected by safety guard', details: validation.errors, ai_run_id: aiRun?.id },
+        { status: 422 }
       );
     }
 
-    const persisted = updatedConversation.source_metadata?.reflection_map;
+    // 5. Save Map
+    const { error: saveError } = await supabase
+      .from('conversation_maps')
+      .upsert({
+        conversation_id: conversationId,
+        user_id: user.id,
+        map_data: mapData as any
+      }, { onConflict: 'conversation_id' });
+
+    if (saveError) {
+      console.error('[Map] Database save failed', saveError);
+      return NextResponse.json({ error: 'Failed to save map' }, { status: 500 });
+    }
 
     return NextResponse.json({
       data: {
-        map: persisted.map,
-        version: persisted.version,
-        generated_at: persisted.generated_at,
-        execution_time_ms: persisted.execution_time_ms,
-        already_existed: false
+        map: mapData,
+        ai_run: aiRun
       }
-    }, { status: 200 });
+    });
 
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (e: any) {
+    console.error('[Map] Unexpected error:', e);
+    return NextResponse.json({ error: e.message || 'Unknown error' }, { status: 500 });
   }
-}
-
-function generateStubMap(
-  rawText: string,
-  participants: string[],
-  platform: string
-) {
-  const textLength = rawText.length;
-  const lineCount = rawText.split('\n').length;
-
-  let quality: 'rich' | 'moderate' | 'sparse' = 'sparse';
-  let readiness: 'high' | 'medium' | 'low' = 'low';
-
-  if (lineCount > 100 && textLength > 2000) {
-    quality = 'rich';
-    readiness = 'high';
-  } else if (lineCount > 20 && textLength > 500) {
-    quality = 'moderate';
-    readiness = 'medium';
-  }
-
-  return {
-    participants: participants.map(name => ({
-      name,
-      inferred_role: 'unknown',
-      engagement_pattern: 'unknown'
-    })),
-    themes: ['professional discussion', 'relationship building'],
-    timeline_phases: [
-      {
-        phase: 'Full conversation',
-        approximate_timeframe: 'Entire range',
-        summary: 'v0 stub: conversation requires AI mapping for detailed analysis'
-      }
-    ],
-    relationship_trajectory: 'active conversation',
-    signal_hotspots: [
-      {
-        location: 'Throughout conversation',
-        type: 'pattern',
-        reason: 'v0 stub: real hotspot detection requires AI analysis'
-      }
-    ],
-    interpretation_guardrails: [
-      'v0 stub: detailed guardrails require AI context analysis',
-      'Treat all extractions as preliminary until AI mapping is enabled'
-    ],
-    conversation_quality: quality,
-    extraction_readiness: readiness
-  };
 }

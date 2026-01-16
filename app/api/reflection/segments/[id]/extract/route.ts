@@ -5,8 +5,10 @@ type ValidationResult = {
   valid: boolean;
   errors: string[];
   status: 'success' | 'partial' | 'failed';
-  errorType?: 'invalid_json' | 'missing_required_fields' | 'timeout' | 'rate_limit' | 'other';
+  errorType?: 'invalid_json' | 'missing_required_fields' | 'timeout' | 'rate_limit' | 'other' | 'forbidden_content';
 };
+
+const FORBIDDEN_TERMS = ['rank', 'priority', 'score', 'urgent', 'importance', 'top insight', 'recommended action'];
 
 function validateAIResponse(response: any): ValidationResult {
   const errors: string[] = [];
@@ -18,6 +20,19 @@ function validateAIResponse(response: any): ValidationResult {
       status: 'failed',
       errorType: 'invalid_json',
     };
+  }
+
+  // Forbidden Term Check (Recursive or string search)
+  const jsonString = JSON.stringify(response).toLowerCase();
+  for (const term of FORBIDDEN_TERMS) {
+    if (jsonString.includes(term)) {
+      return {
+        valid: false,
+        errors: [`Forbidden term detected: "${term}". AI ranking/scoring is not allowed.`],
+        status: 'failed',
+        errorType: 'forbidden_content'
+      };
+    }
   }
 
   if (!response.status || !['success', 'partial', 'failed'].includes(response.status)) {
@@ -35,6 +50,9 @@ function validateAIResponse(response: any): ValidationResult {
       'confidence_level',
       'excerpt',
       'risk_of_misinterpretation',
+      // New fields required
+      'why_surfaced',
+      'ambiguity_note'
     ];
 
     const validSignalTypes = ['pattern', 'opportunity', 'warning', 'insight', 'promise'];
@@ -128,6 +146,9 @@ type CandidateOut = {
   related_themes?: string[] | null;
   temporal_context?: string | null;
   suggested_links?: any;
+  // new
+  why_surfaced: string;
+  ambiguity_note: string;
 };
 
 function makeCandidate(partial: Partial<CandidateOut>): CandidateOut {
@@ -150,6 +171,8 @@ function makeCandidate(partial: Partial<CandidateOut>): CandidateOut {
     related_themes: partial.related_themes ?? null,
     temporal_context: partial.temporal_context ?? null,
     suggested_links: partial.suggested_links ?? null,
+    why_surfaced: partial.why_surfaced ?? 'Heuristic pattern match',
+    ambiguity_note: partial.ambiguity_note ?? 'Automated extraction without semantic understanding.',
   };
 }
 
@@ -199,6 +222,8 @@ function heuristicExtract(segmentText: string): CandidateOut[] {
           trust_evidence: item.speaker ? `Message by ${item.speaker}` : null,
           action_suggested: true,
           related_themes: ['scheduling', 'coordination'],
+          why_surfaced: 'Detected time/date keywords indicating scheduling.',
+          ambiguity_note: 'Might be a past event reference, not a future plan.'
         })
       );
     }
@@ -221,6 +246,8 @@ function heuristicExtract(segmentText: string): CandidateOut[] {
           trust_evidence: item.speaker ? `Message by ${item.speaker}` : null,
           action_suggested: true,
           related_themes: ['follow-up', 'relationship'],
+          why_surfaced: 'Detected follow-up vocabulary.',
+          ambiguity_note: 'Could be a courtesy closing rather than a firm plan.'
         })
       );
     }
@@ -243,6 +270,8 @@ function heuristicExtract(segmentText: string): CandidateOut[] {
           trust_evidence: item.speaker ? `Message by ${item.speaker}` : null,
           action_suggested: true,
           related_themes: ['open-loop'],
+          why_surfaced: 'Detected question phrasing.',
+          ambiguity_note: 'Question might be rhetorical or already answered.'
         })
       );
     }
@@ -265,6 +294,8 @@ function heuristicExtract(segmentText: string): CandidateOut[] {
           trust_evidence: item.speaker ? `Message by ${item.speaker}` : null,
           action_suggested: true,
           related_themes: ['commitment', 'next-steps'],
+          why_surfaced: 'Strong commitment language detected.',
+          ambiguity_note: 'Commitment might be casual or conditional.'
         })
       );
     }
@@ -287,6 +318,8 @@ function heuristicExtract(segmentText: string): CandidateOut[] {
           trust_evidence: item.speaker ? `Message by ${item.speaker}` : null,
           action_suggested: true,
           related_themes: ['planning', 'execution'],
+          why_surfaced: 'Explicit intent or planning language.',
+          ambiguity_note: 'Action might be hypothetical.'
         })
       );
     }
@@ -309,6 +342,8 @@ function heuristicExtract(segmentText: string): CandidateOut[] {
           trust_evidence: item.speaker ? `Message by ${item.speaker}` : null,
           action_suggested: true,
           related_themes: ['risk', 'blocker'],
+          why_surfaced: 'Negative sentiment or block words detected.',
+          ambiguity_note: 'Context might mitigate the risk.'
         })
       );
     }
@@ -332,6 +367,8 @@ function heuristicExtract(segmentText: string): CandidateOut[] {
           trust_evidence: a.speaker ? `Message by ${a.speaker}` : null,
           action_suggested: false,
           related_themes: ['context'],
+          why_surfaced: 'Representative sample for low-signal conversation.',
+          ambiguity_note: 'May not contain actionable insight.'
         })
       );
     }
@@ -379,8 +416,11 @@ export async function POST(
     }
     console.log('[Extract] Segment found, status:', segment.extraction_status, 'len:', segment.segment_text?.length);
 
-    const status = segment.extraction_status ?? 'pending';
-    if (status === 'completed' || status === 'processing') {
+    // If force is false, block re-runs
+    const processingOrCompleted = segment.extraction_status === 'completed' || segment.extraction_status === 'processing';
+    const force = request.nextUrl.searchParams.get('force') === 'true';
+
+    if (processingOrCompleted && !force) {
       console.log('[Extract] Segment already processed, blocking re-run');
       return NextResponse.json({ error: 'Segment already processed or processing' }, { status: 409 });
     }
@@ -526,6 +566,10 @@ export async function POST(
       related_themes: Array.isArray(c.related_themes) ? c.related_themes : null,
       temporal_context: c.temporal_context ?? null,
       suggested_links: c.suggested_links ?? null,
+
+      // new fields
+      why_surfaced: c.why_surfaced,
+      ambiguity_note: c.ambiguity_note,
 
       review_status: 'pending',
       is_reviewed: false,

@@ -42,6 +42,8 @@ export function ConversationInbox() {
   const [saving, setSaving] = useState(false);
   const [saveMode, setSaveMode] = useState<SaveMode>('supabase');
   const [status, setStatus] = useState<string>('');
+  const [savedId, setSavedId] = useState<string | null>(null);
+  const [savedTitle, setSavedTitle] = useState<string>('');
 
   const hasEnv = useMemo(() => {
     try {
@@ -87,13 +89,13 @@ export function ConversationInbox() {
 
       // NOTE: This assumes your enum source_type includes 'manual'. If your enum differs,
       // switch this to the correct value in Supabase.
-      const { error } = await supabase.from('raw_conversations').insert({
+      const { data: inserted, error } = await supabase.from('raw_conversations').insert({
         user_id: userId,
         raw_text: rawText,
         title: t,
         source_type: 'manual',
         source_metadata: { source },
-      } as any);
+      } as any).select('id, title').single();
 
       if (error) {
         setStatus(`Saved failed in Supabase: ${error.message}. Saving locally instead.`);
@@ -103,6 +105,8 @@ export function ConversationInbox() {
         saveLocal(convos);
       } else {
         setStatus('Saved to Supabase: raw_conversations');
+        setSavedId(inserted.id);
+        setSavedTitle(inserted.title || 'Conversation');
       }
     } catch (e: any) {
       setStatus(`Supabase error: ${e?.message || 'unknown'}. Saved locally instead.`);
@@ -175,6 +179,15 @@ export function ConversationInbox() {
           </div>
 
           {status ? <div className="text-sm text-muted-foreground">{status}</div> : null}
+
+          {savedId && (
+            <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-md">
+              <p className="text-green-800 text-sm font-medium mb-2">Saved "{savedTitle}"</p>
+              <a href={`/conversations/${savedId}`} className="inline-flex h-9 items-center justify-center rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white shadow transition-colors hover:bg-green-700 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50">
+                Go to Map Conversation →
+              </a>
+            </div>
+          )}
         </CardContent>
       </Card>
 

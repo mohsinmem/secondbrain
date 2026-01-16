@@ -37,7 +37,7 @@ export async function POST(
       return jsonError('Invalid action. Must be: accept, reject, defer, edit', 400);
     }
 
-    // Fetch candidate and verify ownership (signal_candidates.user_id exists in your schema)
+    // Fetch candidate and verify ownership
     const { data: candidate, error: fetchError } = await supabase
       .from('signal_candidates')
       .select('*')
@@ -170,6 +170,30 @@ export async function POST(
     // ACCEPT (promote)
     const isElevated = elevatedFlag === true || reflection_data?.elevated === true;
 
+    // Fetch weights to snapshot
+    const { data: weights } = await supabase
+      .from('candidate_weights')
+      .select('*')
+      .eq('candidate_id', candidateId)
+      .maybeSingle();
+
+    // Construct final user notes with weight snapshot
+    let finalNotes = user_notes || '';
+    if (weights) {
+      const snapshot = [
+        weights.relevance ? `Relevance: ${weights.relevance}/5` : null,
+        weights.importance ? `Importance: ${weights.importance}/5` : null,
+        weights.energy_impact ? `Energy: ${weights.energy_impact}` : null,
+        weights.confidence ? `Confidence: ${weights.confidence}` : null,
+        weights.action_timing ? `Action: ${weights.action_timing}` : null,
+        weights.notes ? `Weight Notes: ${weights.notes}` : null
+      ].filter(Boolean).join(', ');
+
+      if (snapshot) {
+        finalNotes = finalNotes ? `${finalNotes}\n\n[Weights Snapshot]: ${snapshot}` : `[Weights Snapshot]: ${snapshot}`;
+      }
+    }
+
     // 1) Create signal FIRST
     const { data: signal, error: signalError } = await supabase
       .from('signals')
@@ -188,7 +212,7 @@ export async function POST(
         trust_evidence: candidate.trust_evidence ?? null,
 
         action_required: isElevated,
-        user_notes: user_notes,
+        user_notes: finalNotes || null,
         status: 'open',
 
         source_conversation_id: candidate.source_conversation_id ?? null,
@@ -201,6 +225,20 @@ export async function POST(
       .single();
 
     if (signalError || !signal) {
+      if (signalError?.code === '23505') { // Unique constraint violation
+        // Rerun idempotency check
+        const { data: existing } = await supabase
+          .from('signals')
+          .select('id')
+          .eq('approved_from_candidate_id', candidateId)
+          .maybeSingle();
+        if (existing) {
+          return NextResponse.json(
+            { data: { status: 'accepted', signal_id: existing.id, already_existed: true } },
+            { status: 200 }
+          );
+        }
+      }
       return jsonError(signalError?.message ?? 'Failed to create signal', 500);
     }
 

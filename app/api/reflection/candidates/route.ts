@@ -62,7 +62,9 @@ export async function GET(request: NextRequest) {
         review_status,
         deferred_until,
         created_at,
-        updated_at
+        updated_at,
+        why_surfaced,
+        ambiguity_note
       `)
       .eq('source_conversation_id', conversationId)
       .eq('user_id', user.id)
