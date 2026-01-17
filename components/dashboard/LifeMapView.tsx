@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -29,6 +29,7 @@ export function LifeMapView() {
     const [loading, setLoading] = useState(true);
     const [showOverlays, setShowOverlays] = useState(true);
     const [uploadingFile, setUploadingFile] = useState(false);
+    const fileInputRef = React.useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         fetchCalendarSources();
@@ -122,18 +123,20 @@ export function LifeMapView() {
                         Import your calendar to see the structure of your life.
                     </p>
                     <div className="space-y-4">
-                        <label className="inline-block">
-                            <input
-                                type="file"
-                                accept=".ics"
-                                onChange={handleFileUpload}
-                                disabled={uploadingFile}
-                                className="hidden"
-                            />
-                            <Button disabled={uploadingFile}>
-                                {uploadingFile ? 'Uploading...' : 'Import Calendar (.ics)'}
-                            </Button>
-                        </label>
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept=".ics"
+                            onChange={handleFileUpload}
+                            disabled={uploadingFile}
+                            className="hidden"
+                        />
+                        <Button
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={uploadingFile}
+                        >
+                            {uploadingFile ? 'Uploading...' : 'Import Calendar (.ics)'}
+                        </Button>
                         <p className="text-sm text-gray-500">
                             Export your calendar as .ics from Google Calendar, Outlook, or Apple Calendar
                         </p>
@@ -154,18 +157,21 @@ export function LifeMapView() {
                     </p>
                 </div>
                 <div className="flex gap-2">
-                    <label>
-                        <input
-                            type="file"
-                            accept=".ics"
-                            onChange={handleFileUpload}
-                            disabled={uploadingFile}
-                            className="hidden"
-                        />
-                        <Button variant="outline" disabled={uploadingFile}>
-                            {uploadingFile ? 'Uploading...' : 'Import More'}
-                        </Button>
-                    </label>
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".ics"
+                        onChange={handleFileUpload}
+                        disabled={uploadingFile}
+                        className="hidden"
+                    />
+                    <Button
+                        variant="outline"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploadingFile}
+                    >
+                        {uploadingFile ? 'Uploading...' : 'Import More'}
+                    </Button>
                     <Button
                         variant="outline"
                         onClick={() => setShowOverlays(!showOverlays)}
