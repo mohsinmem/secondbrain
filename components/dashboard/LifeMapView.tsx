@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -28,8 +28,99 @@ export function LifeMapView() {
     const [selectedSource, setSelectedSource] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [showOverlays, setShowOverlays] = useState(true);
+    const [activeWeekKey, setActiveWeekKey] = useState<string | null>(null);
     const [uploadingFile, setUploadingFile] = useState(false);
+
     const fileInputRef = React.useRef<HTMLInputElement>(null);
+    const weekRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
+    const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
+
+    // --- Helpers for Grouping ---
+    function pad2(n: number) {
+        return n.toString().padStart(2, '0');
+    }
+
+    // Monday-start week
+    function startOfWeek(d: Date) {
+        const date = new Date(d);
+        const day = date.getDay(); // 0=Sun,1=Mon...
+        const diff = (day === 0 ? -6 : 1) - day; // shift to Monday
+        date.setDate(date.getDate() + diff);
+        date.setHours(0, 0, 0, 0);
+        return date;
+    }
+
+    function formatRangeLabel(weekStart: Date) {
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+
+        const start = `${weekStart.getFullYear()}-${pad2(weekStart.getMonth() + 1)}-${pad2(weekStart.getDate())}`;
+        const end = `${weekEnd.getFullYear()}-${pad2(weekEnd.getMonth() + 1)}-${pad2(weekEnd.getDate())}`;
+
+        return `${start} → ${end}`;
+    }
+
+    function formatWeekCompact(weekStart: Date) {
+        // e.g., "Nov 04"
+        return weekStart.toLocaleDateString([], { month: 'short', day: '2-digit' });
+    }
+
+    const eventsByWeek = useMemo(() => {
+        const groups = new Map<string, { weekStart: Date; items: CalendarEvent[] }>();
+
+        for (const ev of events) {
+            const start = new Date(ev.start_at);
+            const wk = startOfWeek(start);
+            const key = wk.toISOString().slice(0, 10); // YYYY-MM-DD (week start)
+
+            if (!groups.has(key)) {
+                groups.set(key, { weekStart: wk, items: [] });
+            }
+            groups.get(key)!.items.push(ev);
+        }
+
+        const sorted = Array.from(groups.entries())
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([key, g]) => {
+                g.items.sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+                return { key, ...g };
+            });
+
+        return sorted;
+    }, [events]);
+
+    useEffect(() => {
+        if (!scrollContainerRef.current) return;
+        if (eventsByWeek.length === 0) return;
+
+        const container = scrollContainerRef.current;
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                const visible = entries
+                    .filter((e) => e.isIntersecting)
+                    .sort((a, b) => (a.boundingClientRect.top - b.boundingClientRect.top));
+
+                const first = visible[0];
+                if (first?.target) {
+                    const key = (first.target as HTMLElement).dataset.weekKey;
+                    if (key) setActiveWeekKey(key);
+                }
+            },
+            {
+                root: container,
+                rootMargin: '-10% 0px -80% 0px',
+                threshold: 0.01,
+            }
+        );
+
+        eventsByWeek.forEach((g) => {
+            const el = document.querySelector(`[data-week-header="true"][data-week-key="${g.key}"]`);
+            if (el) observer.observe(el);
+        });
+
+        return () => observer.disconnect();
+    }, [eventsByWeek]);
 
     useEffect(() => {
         fetchCalendarSources();
@@ -204,43 +295,117 @@ export function LifeMapView() {
                 </div>
             </div>
 
-            {/* Simple Timeline View */}
-            <Card className="p-6">
-                <div className="space-y-4">
-                    <h3 className="font-semibold text-lg">Event Timeline</h3>
+            {/* Overview Strip (Orientation Navigation Only) */}
+            <div className="flex items-center justify-between gap-3 bg-gray-50 p-3 rounded border">
+                <div className="text-sm font-medium text-gray-600 shrink-0">
+                    Jump to week
+                </div>
 
+                <div className="flex-1 overflow-x-auto no-scrollbar">
+                    <div className="flex gap-2 py-1">
+                        {eventsByWeek.map((g) => {
+                            const isActive = g.key === activeWeekKey;
+                            return (
+                                <button
+                                    key={g.key}
+                                    type="button"
+                                    onClick={() => {
+                                        const target = weekRefs.current[g.key];
+                                        if (target && scrollContainerRef.current) {
+                                            scrollContainerRef.current.scrollTo({
+                                                top: target.offsetTop - 8,
+                                                behavior: 'smooth',
+                                            });
+                                        }
+                                    }}
+                                    className={[
+                                        "shrink-0 rounded border px-3 py-1 text-xs font-medium transition-colors",
+                                        isActive
+                                            ? "border-gray-900 bg-gray-900 text-white"
+                                            : "border-gray-300 bg-white text-gray-600 hover:border-gray-400 hover:bg-gray-50"
+                                    ].join(" ")}
+                                    aria-label={`Jump to week starting ${formatWeekCompact(g.weekStart)}`}
+                                >
+                                    {formatWeekCompact(g.weekStart)}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+
+            {/* Simple Timeline View */}
+            <Card className="p-0 overflow-hidden">
+                <div className="">
                     {events.length === 0 ? (
                         <p className="text-gray-500 text-center py-8">No events found</p>
                     ) : (
-                        <div className="space-y-2 max-h-[600px] overflow-y-auto">
-                            {events.map((event) => {
-                                const startDate = new Date(event.start_at);
-                                const endDate = new Date(event.end_at);
-                                const duration = (endDate.getTime() - startDate.getTime()) / (1000 * 60); // minutes
+                        <div ref={scrollContainerRef} className="max-h-[700px] overflow-y-auto custom-scrollbar">
+                            {eventsByWeek.map((group) => {
+                                const count = group.items.length;
+
+                                // Neutral density bar: fixed max width, no gradients, no "heat"
+                                const maxBars = 12;
+                                const bars = Math.min(maxBars, Math.round(count / 3));
 
                                 return (
                                     <div
-                                        key={event.id}
-                                        className="border rounded p-3 hover:shadow-md transition-shadow cursor-pointer"
+                                        key={group.key}
+                                        ref={(el) => { weekRefs.current[group.key] = el; }}
+                                        className="border-b last:border-b-0"
                                     >
-                                        <div className="flex items-start justify-between">
-                                            <div className="flex-1">
-                                                <div className="font-medium">{event.title}</div>
-                                                <div className="text-sm text-gray-600 mt-1">
-                                                    {startDate.toLocaleDateString()} at {startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                                    {duration > 0 && ` · ${Math.round(duration)}min`}
-                                                </div>
-                                                {event.location && (
-                                                    <div className="text-sm text-gray-500 mt-1">
-                                                        📍 {event.location}
-                                                    </div>
-                                                )}
-                                                {event.attendees && event.attendees.length > 0 && showOverlays && (
-                                                    <div className="text-sm text-gray-500 mt-1">
-                                                        Attendees: {event.attendees.length}
-                                                    </div>
-                                                )}
+                                        {/* Sticky week header */}
+                                        <div
+                                            data-week-header="true"
+                                            data-week-key={group.key}
+                                            className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b px-4 py-2 flex items-center justify-between"
+                                        >
+                                            <div className="text-sm font-medium text-gray-900">
+                                                Week: {formatRangeLabel(group.weekStart)}
                                             </div>
+
+                                            {/* Descriptive only: count + small bar */}
+                                            {showOverlays && (
+                                                <div className="flex items-center gap-3">
+                                                    <div className="text-xs text-gray-600">{count} events</div>
+                                                    <div className="flex gap-1" aria-label={`Week density: ${count} events`}>
+                                                        {Array.from({ length: bars }).map((_, i) => (
+                                                            <div key={i} className="h-2 w-2 rounded-sm bg-gray-300" />
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Week events */}
+                                        <div className="p-2 space-y-2">
+                                            {group.items.map((event) => {
+                                                const startDate = new Date(event.start_at);
+                                                const endDate = new Date(event.end_at);
+                                                const duration = (endDate.getTime() - startDate.getTime()) / (1000 * 60); // minutes
+
+                                                return (
+                                                    <div
+                                                        key={event.id}
+                                                        className="border rounded p-3 hover:shadow-md transition-shadow cursor-pointer bg-white"
+                                                    >
+                                                        <div className="font-medium">{event.title}</div>
+                                                        <div className="text-sm text-gray-600 mt-1">
+                                                            {startDate.toLocaleDateString()} at{' '}
+                                                            {startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                            {duration > 0 && ` · ${Math.round(duration)}min`}
+                                                        </div>
+
+                                                        {event.location && (
+                                                            <div className="text-sm text-gray-500 mt-1">📍 {event.location}</div>
+                                                        )}
+
+                                                        {event.attendees && event.attendees.length > 0 && showOverlays && (
+                                                            <div className="text-sm text-gray-500 mt-1">Attendees: {event.attendees.length}</div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     </div>
                                 );
