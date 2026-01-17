@@ -98,8 +98,21 @@ export async function POST(req: NextRequest) {
 
         if (sourceError || !calendarSource) {
             console.error('Failed to create calendar source:', sourceError);
+
+            // Check if it's a missing table error
+            if (sourceError?.message?.includes('relation') || sourceError?.message?.includes('does not exist')) {
+                return NextResponse.json(
+                    {
+                        error: 'Database tables not found. Please run the Phase 3 migration first.',
+                        details: 'Run: supabase db push or apply migration 20260117143000_phase3_calendar_schema.sql',
+                        technical_error: sourceError.message
+                    },
+                    { status: 500 }
+                );
+            }
+
             return NextResponse.json(
-                { error: 'Failed to create calendar source.' },
+                { error: 'Failed to create calendar source.', details: sourceError?.message },
                 { status: 500 }
             );
         }

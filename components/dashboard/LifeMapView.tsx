@@ -92,21 +92,37 @@ export function LifeMapView() {
                 body: formData,
             });
 
-            const result = await response.json();
+            // Handle non-JSON responses (like HTML error pages)
+            const contentType = response.headers.get('content-type');
+            let result;
+
+            if (contentType && contentType.includes('application/json')) {
+                result = await response.json();
+            } else {
+                const text = await response.text();
+                console.error('Non-JSON response:', text);
+                alert(`Upload failed: Server returned an error. Check browser console for details.`);
+                return;
+            }
 
             if (response.ok) {
-                alert(`Successfully imported ${result.events_imported} events!`);
+                alert(`Successfully imported ${result.events_imported} events!${result.events_duplicate > 0 ? ` (${result.events_duplicate} duplicates skipped)` : ''}`);
                 await fetchCalendarSources();
                 if (result.source_id) {
                     setSelectedSource(result.source_id);
                 }
             } else {
-                alert(`Upload failed: ${result.error}`);
+                alert(`Upload failed: ${result.error || 'Unknown error'}`);
             }
         } catch (error: any) {
+            console.error('Upload error:', error);
             alert(`Upload error: ${error.message}`);
         } finally {
             setUploadingFile(false);
+            // Reset the file input so the same file can be uploaded again
+            if (e.target) {
+                e.target.value = '';
+            }
         }
     }
 
