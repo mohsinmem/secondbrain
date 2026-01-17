@@ -224,13 +224,13 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
 
                 {/* Raw Payload (Truth Layer) - Collapsed by default */}
                 <section className="space-y-3">
-                    <details className="group border rounded-lg bg-gray-50">
-                        <summary className="flex items-center justify-between text-[11px] font-bold text-gray-400 uppercase tracking-widest cursor-pointer list-none p-3 hover:text-gray-600 transition-colors">
+                    <details className="group">
+                        <summary className="flex items-center justify-between text-[11px] font-bold text-gray-400 uppercase tracking-widest cursor-pointer list-none hover:text-gray-600 transition-colors">
                             <span>Inspect Raw Truth Atom</span>
                             <span className="text-[10px] font-normal group-open:hidden">▼</span>
                             <span className="text-[10px] font-normal group-open:inline hidden">▲</span>
                         </summary>
-                        <div className="px-3 pb-3">
+                        <div className="mt-3 p-3 border rounded-lg bg-gray-50 animate-in fade-in slide-in-from-top-1">
                             <Card className="p-3 bg-gray-900 text-gray-300 font-mono text-[10px] overflow-x-auto border-none shadow-inner">
                                 <pre>{JSON.stringify(event.raw_payload, null, 2)}</pre>
                             </Card>
