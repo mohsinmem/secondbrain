@@ -81,6 +81,17 @@ export function parseICS(
                     continue;
                 }
 
+                // --- START OF FIX: COMPOSITE EXTERNAL ID FOR RECURRING EVENTS ---
+                // RECURRENCE-ID exists on overridden instances; fallback to DTSTART for normal instances
+                const recurrenceIdDate = (event as any).recurrenceId?.toJSDate?.() || null;
+                const occurrenceKeyDate = (recurrenceIdDate && !isNaN(recurrenceIdDate.getTime()))
+                    ? recurrenceIdDate
+                    : startDate;
+
+                const occurrenceKey = occurrenceKeyDate.toISOString();
+                const externalEventId = `${uid}::${occurrenceKey}`;
+                // --- END OF FIX ---
+
                 // Apply date range filter if provided
                 if (dateRangeStart && endDate < dateRangeStart) continue;
                 if (dateRangeEnd && startDate > dateRangeEnd) continue;
@@ -119,7 +130,7 @@ export function parseICS(
                 }
 
                 result.events.push({
-                    external_event_id: uid,
+                    external_event_id: externalEventId,
                     title: summary,
                     start_at: startDate,
                     end_at: endDate,
