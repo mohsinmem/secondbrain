@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
         const dateRangeStart = dateRangeStartStr ? new Date(dateRangeStartStr) : undefined;
         const dateRangeEnd = dateRangeEndStr ? new Date(dateRangeEndStr) : undefined;
 
-        const parseResult = await parseICS(icsContent, dateRangeStart, dateRangeEnd);
+        const parseResult = parseICS(icsContent, dateRangeStart, dateRangeEnd);
 
         if (parseResult.errors.length > 0 && parseResult.events.length === 0) {
             return NextResponse.json(
@@ -179,8 +179,12 @@ export async function POST(req: NextRequest) {
             events_duplicate: duplicateCount,
             total_events_found: parseResult.totalFound,
             date_range: {
-                start: parseResult.dateRange.earliest?.toISOString(),
-                end: parseResult.dateRange.latest?.toISOString(),
+                start: parseResult.dateRange.earliest && !isNaN(parseResult.dateRange.earliest.getTime())
+                    ? parseResult.dateRange.earliest.toISOString()
+                    : undefined,
+                end: parseResult.dateRange.latest && !isNaN(parseResult.dateRange.latest.getTime())
+                    ? parseResult.dateRange.latest.toISOString()
+                    : undefined,
             },
             parse_errors: parseResult.errors.length > 0 ? parseResult.errors : undefined,
         }, { status: 200 });

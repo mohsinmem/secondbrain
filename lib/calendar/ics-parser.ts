@@ -8,8 +8,7 @@
  * - Preserves raw data for traceability
  */
 
-// ical.js is imported dynamically to avoid server-side crashes in some edge environments
-// import ICAL from 'ical.js';
+import ICAL from 'ical.js';
 
 export interface ParsedEvent {
     external_event_id: string;
@@ -38,11 +37,11 @@ export interface ICSParseResult {
  * @param dateRangeEnd - Optional: filter events ending before this date
  * @returns Parsed events with metadata
  */
-export async function parseICS(
+export function parseICS(
     icsContent: string,
     dateRangeStart?: Date,
     dateRangeEnd?: Date
-): Promise<ICSParseResult> {
+): ICSParseResult {
     const result: ICSParseResult = {
         events: [],
         errors: [],
@@ -54,19 +53,22 @@ export async function parseICS(
     };
 
     try {
-        // Load ICAL dynamically
-        // @ts-ignore
-        const ICAL = await import('ical.js').then(m => m.default || m);
+        // Fallback-safe import for ical.js
+        let parser = ICAL;
+        if (!parser || typeof parser.parse !== 'function') {
+            // @ts-ignore - Fallback for internal bundler issues
+            parser = (ICAL as any).default || ICAL;
+        }
 
-        const jcalData = ICAL.parse(icsContent);
-        const comp = new ICAL.Component(jcalData);
+        const jcalData = parser.parse(icsContent);
+        const comp = new parser.Component(jcalData);
         const vevents = comp.getAllSubcomponents('vevent');
 
         result.totalFound = vevents.length;
 
         for (const vevent of vevents) {
             try {
-                const event = new ICAL.Event(vevent);
+                const event = new parser.Event(vevent);
 
                 // Extract basic fields
                 const uid = event.uid;
@@ -74,8 +76,8 @@ export async function parseICS(
                 const startDate = event.startDate?.toJSDate();
                 const endDate = event.endDate?.toJSDate();
 
-                if (!startDate || !endDate) {
-                    result.errors.push(`Event "${summary}" missing start/end time`);
+                if (!startDate || !endDate || isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+                    result.errors.push(`Event "${summary}" has missing or invalid start/end time`);
                     continue;
                 }
 
