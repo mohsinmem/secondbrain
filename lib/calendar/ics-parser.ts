@@ -8,7 +8,8 @@
  * - Preserves raw data for traceability
  */
 
-import ICAL from 'ical.js';
+// ical.js is imported dynamically to avoid server-side crashes in some edge environments
+// import ICAL from 'ical.js';
 
 export interface ParsedEvent {
     external_event_id: string;
@@ -37,11 +38,11 @@ export interface ICSParseResult {
  * @param dateRangeEnd - Optional: filter events ending before this date
  * @returns Parsed events with metadata
  */
-export function parseICS(
+export async function parseICS(
     icsContent: string,
     dateRangeStart?: Date,
     dateRangeEnd?: Date
-): ICSParseResult {
+): Promise<ICSParseResult> {
     const result: ICSParseResult = {
         events: [],
         errors: [],
@@ -53,6 +54,10 @@ export function parseICS(
     };
 
     try {
+        // Load ICAL dynamically
+        // @ts-ignore
+        const ICAL = await import('ical.js').then(m => m.default || m);
+
         const jcalData = ICAL.parse(icsContent);
         const comp = new ICAL.Component(jcalData);
         const vevents = comp.getAllSubcomponents('vevent');

@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
         const dateRangeStart = dateRangeStartStr ? new Date(dateRangeStartStr) : undefined;
         const dateRangeEnd = dateRangeEndStr ? new Date(dateRangeEndStr) : undefined;
 
-        const parseResult = parseICS(icsContent, dateRangeStart, dateRangeEnd);
+        const parseResult = await parseICS(icsContent, dateRangeStart, dateRangeEnd);
 
         if (parseResult.errors.length > 0 && parseResult.events.length === 0) {
             return NextResponse.json(

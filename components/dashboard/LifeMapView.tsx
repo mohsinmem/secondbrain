@@ -57,6 +57,13 @@ export function LifeMapView() {
             }
         } catch (error: any) {
             console.error('Error fetching calendar sources:', error);
+            // Give a more helpful message if it's likely a missing table
+            const msg = error.message || '';
+            if (msg.includes('relation') || msg.includes('does not exist')) {
+                alert('Database tables not found. Please run the Phase 3 migration (supabase/migrations/20260117143000_phase3_calendar_schema.sql) in your Supabase SQL Editor.');
+            } else {
+                alert(`Error fetching calendar sources: ${msg}`);
+            }
         } finally {
             setLoading(false);
         }
