@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { EventDetailPanel } from '@/components/events/EventDetailPanel';
 
 interface CalendarEvent {
     id: string;
@@ -26,6 +27,7 @@ export function LifeMapView() {
     const [sources, setSources] = useState<CalendarSource[]>([]);
     const [events, setEvents] = useState<CalendarEvent[]>([]);
     const [selectedSource, setSelectedSource] = useState<string | null>(null);
+    const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
     const [loading, setLoading] = useState(true);
     const [showOverlays, setShowOverlays] = useState(true);
     const [activeWeekKey, setActiveWeekKey] = useState<string | null>(null);
@@ -387,6 +389,7 @@ export function LifeMapView() {
                                                 return (
                                                     <div
                                                         key={event.id}
+                                                        onClick={() => setSelectedEvent(event)}
                                                         className="border rounded p-3 hover:shadow-md transition-shadow cursor-pointer bg-white"
                                                     >
                                                         <div className="font-medium">{event.title}</div>
@@ -423,6 +426,20 @@ export function LifeMapView() {
                         For now, this list view shows your event structure chronologically.
                     </div>
                 </Card>
+            )}
+
+            {/* Event Detail Panel Overlay */}
+            {selectedEvent && (
+                <>
+                    <div
+                        className="fixed inset-0 bg-black/40 z-40 animate-in fade-in"
+                        onClick={() => setSelectedEvent(null)}
+                    />
+                    <EventDetailPanel
+                        event={selectedEvent}
+                        onClose={() => setSelectedEvent(null)}
+                    />
+                </>
             )}
         </div>
     );
