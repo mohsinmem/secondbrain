@@ -82,14 +82,21 @@ export async function POST(req: NextRequest) {
         }
 
         // 5. Create calendar_source record
+        const startDateString = parseResult.dateRange.earliest && !isNaN(parseResult.dateRange.earliest.getTime())
+            ? parseResult.dateRange.earliest.toISOString().split('T')[0]
+            : null;
+        const endDateString = parseResult.dateRange.latest && !isNaN(parseResult.dateRange.latest.getTime())
+            ? parseResult.dateRange.latest.toISOString().split('T')[0]
+            : null;
+
         const { data: calendarSource, error: sourceError } = await supabase
             .from('calendar_sources')
             .insert({
                 user_id: user.id,
                 provider: 'upload',
                 sync_mode: 'upload',
-                date_range_start: parseResult.dateRange.earliest?.toISOString().split('T')[0] || null,
-                date_range_end: parseResult.dateRange.latest?.toISOString().split('T')[0] || null,
+                date_range_start: startDateString,
+                date_range_end: endDateString,
                 last_synced_at: new Date().toISOString(),
                 status: 'active',
             })
@@ -97,22 +104,26 @@ export async function POST(req: NextRequest) {
             .single();
 
         if (sourceError || !calendarSource) {
-            console.error('Failed to create calendar source:', sourceError);
+            console.error('Failed to create calendar source:', JSON.stringify(sourceError));
 
-            // Check if it's a missing table error
-            if (sourceError?.message?.includes('relation') || sourceError?.message?.includes('does not exist')) {
+            // Explicitly check for relation not found
+            const errorMessage = sourceError?.message || '';
+            if (errorMessage.includes('relation') || errorMessage.includes('does not exist')) {
                 return NextResponse.json(
                     {
                         error: 'Database tables not found. Please run the Phase 3 migration first.',
-                        details: 'Run: supabase db push or apply migration 20260117143000_phase3_calendar_schema.sql',
-                        technical_error: sourceError.message
+                        details: 'Run: supabase db push or apply migration supabase/migrations/20260117143000_phase3_calendar_schema.sql',
+                        technical_error: errorMessage
                     },
                     { status: 500 }
                 );
             }
 
             return NextResponse.json(
-                { error: 'Failed to create calendar source.', details: sourceError?.message },
+                {
+                    error: 'Failed to create calendar source.',
+                    details: errorMessage || 'Unknown database error'
+                },
                 { status: 500 }
             );
         }
@@ -131,12 +142,13 @@ export async function POST(req: NextRequest) {
         }));
 
         let insertedCount = 0;
-        let duplicateCount = 0;
+        let totalProcessed = 0;
 
         // Insert in batches to avoid payload size limits
-        const BATCH_SIZE = 100;
+        const BATCH_SIZE = 50; // Smaller batches for safety
         for (let i = 0; i < eventsToInsert.length; i += BATCH_SIZE) {
             const batch = eventsToInsert.slice(i, i + BATCH_SIZE);
+            totalProcessed += batch.length;
 
             const { data: inserted, error: insertError } = await supabase
                 .from('calendar_events')
@@ -147,8 +159,8 @@ export async function POST(req: NextRequest) {
                 .select('id');
 
             if (insertError) {
-                console.error('Failed to insert events batch:', insertError);
-                // Continue with other batches
+                console.error('Failed to insert events batch:', JSON.stringify(insertError));
+                // If the whole batch fails, we skip it but keep going
                 continue;
             }
 
@@ -157,7 +169,7 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        duplicateCount = parseResult.events.length - insertedCount;
+        const duplicateCount = parseResult.events.length - insertedCount;
 
         // 7. Return success response
         return NextResponse.json({
@@ -174,9 +186,13 @@ export async function POST(req: NextRequest) {
         }, { status: 200 });
 
     } catch (error: any) {
-        console.error('Calendar upload error:', error);
+        console.error('Calendar upload stack trace:', error);
         return NextResponse.json(
-            { error: 'Internal server error.', details: error.message },
+            {
+                error: 'Internal server error.',
+                details: error.message || 'An unexpected error occurred during upload.',
+                type: error.name
+            },
             { status: 500 }
         );
     }

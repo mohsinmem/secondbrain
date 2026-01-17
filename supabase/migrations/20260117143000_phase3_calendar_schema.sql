@@ -3,6 +3,15 @@
 -- Calendar Truth Layer + Orientation Layer
 -- ============================================================================
 
+-- 0) Ensure the update_updated_at_column function exists
+CREATE OR REPLACE FUNCTION public.update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
 -- 1) Create calendar_sources table
 CREATE TABLE IF NOT EXISTS public.calendar_sources (
   id uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
