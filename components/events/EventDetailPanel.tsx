@@ -25,9 +25,19 @@ interface EventContext {
 }
 
 interface SignalCandidate {
+    id?: string;
     candidate_text: string;
     why_surfaced: string;
     ambiguity_note: string;
+    promotion_status?: 'pending' | 'promoted' | 'deferred' | 'rejected';
+}
+
+interface DurableSignal {
+    id: string;
+    label: string;
+    description: string;
+    linked_event_id: string;
+    created_at: string;
 }
 
 interface EventDetailPanelProps {
@@ -43,16 +53,32 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
     const [isLinkingConv, setIsLinkingConv] = useState(false);
     const [availableConvs, setAvailableConvs] = useState<any[]>([]);
     const [draftCandidates, setDraftCandidates] = useState<SignalCandidate[]>([]);
+    const [linkedSignals, setLinkedSignals] = useState<DurableSignal[]>([]);
     const [extracting, setExtracting] = useState(false);
+    const [promoting, setPromoting] = useState<string | null>(null);
 
     useEffect(() => {
         if (event) {
             fetchContexts();
+            fetchLinkedSignals();
             setIsAddingNote(false);
             setIsLinkingConv(false);
             setDraftCandidates([]);
         }
     }, [event?.id]);
+
+    async function fetchLinkedSignals() {
+        if (!event) return;
+        try {
+            const resp = await fetch(`/api/events/${event.id}/signals`);
+            if (resp.ok) {
+                const data = await resp.json();
+                setLinkedSignals(data);
+            }
+        } catch (err) {
+            console.error('Failed to fetch linked signals:', err);
+        }
+    }
 
     async function fetchContexts() {
         if (!event) return;
@@ -147,6 +173,7 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
             });
             if (resp.ok) {
                 const data = await resp.json();
+                // v0 API returns candidates array
                 setDraftCandidates(data.candidates || []);
             } else {
                 const err = await resp.json();
@@ -156,6 +183,34 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
             console.error('Failed to extract signals:', err);
         } finally {
             setExtracting(false);
+        }
+    }
+
+    async function handlePromoteCandidate(candidate: SignalCandidate, index: number) {
+        if (!event) return;
+        setPromoting(`promote-${index}`);
+        try {
+            const resp = await fetch('/api/signals/promote', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    candidate_id: candidate.id, // If present
+                    linked_event_id: event.id,
+                    // content fallback for v0 candidates without durable candidate_id
+                    candidate_data: candidate
+                })
+            });
+            if (resp.ok) {
+                // Update local state
+                const updated = [...draftCandidates];
+                updated[index] = { ...updated[index], promotion_status: 'promoted' };
+                setDraftCandidates(updated);
+                await fetchLinkedSignals();
+            }
+        } catch (err) {
+            console.error('Failed to promote candidate:', err);
+        } finally {
+            setPromoting(null);
         }
     }
 
@@ -240,6 +295,35 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                         </div>
                     </details>
                 </section>
+
+                {/* Durable Signals (Step 4) */}
+                {linkedSignals.length > 0 && (
+                    <section className="space-y-6 pt-6 border-t border-gray-100">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">
+                                Anchored Signals
+                            </h3>
+                            <span className="text-[10px] text-gray-400 font-medium bg-gray-100 px-2 py-0.5 rounded uppercase">
+                                Durable Meaning
+                            </span>
+                        </div>
+                        <div className="space-y-3">
+                            {linkedSignals.map(signal => (
+                                <div key={signal.id} className="p-3 border rounded-lg bg-gray-50/50 flex items-start gap-3">
+                                    <span className="text-lg opacity-40">●</span>
+                                    <div className="space-y-1">
+                                        <div className="text-sm font-medium text-gray-900">{signal.label}</div>
+                                        {signal.description && (
+                                            <div className="text-xs text-gray-500 leading-relaxed truncate max-w-[280px]">
+                                                {signal.description}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </section>
+                )}
 
                 {/* Context Attachment (Step 2) */}
                 <section className="space-y-6 pt-6 border-t border-gray-100">
@@ -372,22 +456,23 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                     <section className="space-y-6 pt-6 border-t border-gray-100">
                         <div className="flex items-center justify-between">
                             <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">
-                                Emerging Signals
+                                Emerging Hypotheses
                             </h3>
-                            <span className="text-[10px] text-indigo-500 font-bold bg-indigo-50 px-2 py-0.5 rounded uppercase tracking-widest">
-                                AI Hypotheses
+                            <span className="text-[10px] text-gray-400 font-bold bg-gray-50 px-2 py-0.5 rounded uppercase tracking-widest border border-gray-100">
+                                AI Proposed
                             </span>
                         </div>
 
                         <div className="space-y-4">
                             {draftCandidates.length === 0 ? (
-                                <div className="p-4 rounded-lg bg-indigo-50/30 border border-indigo-100/50 text-center">
-                                    <p className="text-xs text-indigo-900/60 mb-3">
-                                        Analyze attached context to surface possible observations.
+                                <div className="p-4 rounded-lg bg-gray-50/50 border border-dashed border-gray-200 text-center">
+                                    <p className="text-xs text-gray-500 mb-3 leading-relaxed">
+                                        No active hypotheses. Propose candidates based on<br />the attached context.
                                     </p>
                                     <Button
+                                        variant="outline"
                                         size="sm"
-                                        className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs"
+                                        className="h-8 text-[11px] font-bold uppercase tracking-widest border-gray-300 hover:bg-white transition-all shadow-sm"
                                         onClick={handleExtractSignals}
                                         disabled={extracting}
                                     >
@@ -397,28 +482,71 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                             ) : (
                                 <div className="space-y-4">
                                     {draftCandidates.map((c, i) => (
-                                        <Card key={i} className="p-4 bg-white border-indigo-100 shadow-sm space-y-3">
-                                            <div className="text-sm font-medium text-gray-900">
-                                                {c.candidate_text}
+                                        <Card key={i} className={`p-4 bg-white border-dashed border-gray-200 shadow-none space-y-4 transition-opacity ${c.promotion_status === 'promoted' ? 'opacity-50' : ''}`}>
+                                            <div className="flex items-start justify-between gap-4">
+                                                <div className="text-sm font-medium text-gray-900 leading-snug">
+                                                    {c.candidate_text}
+                                                </div>
+                                                {c.promotion_status === 'promoted' ? (
+                                                    <span className="text-[9px] font-bold text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded uppercase tracking-tighter">Accepted</span>
+                                                ) : (
+                                                    <div className="flex gap-1 shrink-0">
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            className="h-7 px-2 text-[10px] font-bold uppercase border-gray-200 hover:bg-gray-50"
+                                                            onClick={() => handlePromoteCandidate(c, i)}
+                                                            disabled={promoting !== null}
+                                                        >
+                                                            {promoting === `promote-${i}` ? '...' : 'Accept'}
+                                                        </Button>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-7 px-2 text-[10px] font-medium text-gray-400"
+                                                            onClick={() => {
+                                                                const updated = [...draftCandidates];
+                                                                updated[i] = { ...updated[i], promotion_status: 'rejected' };
+                                                                setDraftCandidates(updated);
+                                                            }}
+                                                        >
+                                                            Dismiss
+                                                        </Button>
+                                                    </div>
+                                                )}
                                             </div>
-                                            <div className="space-y-2">
-                                                <div className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">Why surfaced</div>
-                                                <div className="text-xs text-gray-600 italic leading-relaxed">
-                                                    "{c.why_surfaced}"
+
+                                            <div className="space-y-3">
+                                                <div className="space-y-1">
+                                                    <div className="text-[9px] text-gray-400 uppercase tracking-widest font-bold">Traceability</div>
+                                                    <div className="text-xs text-gray-600 italic leading-relaxed">
+                                                        "{c.why_surfaced}"
+                                                    </div>
+                                                </div>
+                                                <div className="p-2.5 rounded bg-gray-50/50 border border-gray-100">
+                                                    <div className="text-[9px] text-gray-400 uppercase tracking-widest font-bold mb-1">Ambiguity</div>
+                                                    <div className="text-[11px] text-gray-500 leading-relaxed font-serif">
+                                                        {c.ambiguity_note}
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <div className="p-2.5 rounded bg-gray-50 border border-gray-100">
-                                                <div className="text-[10px] text-gray-400 uppercase tracking-widest font-bold mb-1">Ambiguity Note</div>
-                                                <div className="text-[11px] text-gray-500 leading-relaxed">
-                                                    {c.ambiguity_note}
-                                                </div>
-                                            </div>
+
+                                            {c.promotion_status !== 'promoted' && (
+                                                <details className="group">
+                                                    <summary className="text-[9px] text-gray-400 hover:text-gray-600 cursor-pointer list-none uppercase tracking-widest font-bold">
+                                                        + Add optional details
+                                                    </summary>
+                                                    <div className="mt-2 text-[10px] text-gray-500 italic p-2 border-l-2 border-gray-100">
+                                                        Weights and notes are hidden by default to prioritize orientation. Accuracy over salience.
+                                                    </div>
+                                                </details>
+                                            )}
                                         </Card>
                                     ))}
                                     <Button
                                         variant="ghost"
                                         size="sm"
-                                        className="w-full text-[10px] uppercase tracking-widest text-indigo-600 hover:text-indigo-700"
+                                        className="w-full text-[10px] uppercase tracking-widest text-gray-400 hover:text-gray-600"
                                         onClick={handleExtractSignals}
                                         disabled={extracting}
                                     >

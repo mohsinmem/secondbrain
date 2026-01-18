@@ -13,6 +13,7 @@ interface CalendarEvent {
     end_at: string;
     location?: string;
     attendees?: string[];
+    signals?: { id: string }[]; // For count
 }
 
 interface CalendarSource {
@@ -167,7 +168,7 @@ export function LifeMapView() {
             const supabase = createClient();
             const { data, error } = await supabase
                 .from('calendar_events')
-                .select('*')
+                .select('*, signals(id)')
                 .eq('source_id', sourceId)
                 .order('start_at', { ascending: true });
 
@@ -403,9 +404,16 @@ export function LifeMapView() {
                                                             <div className="text-sm text-gray-500 mt-1">📍 {event.location}</div>
                                                         )}
 
-                                                        {event.attendees && event.attendees.length > 0 && showOverlays && (
-                                                            <div className="text-sm text-gray-500 mt-1">Attendees: {event.attendees.length}</div>
-                                                        )}
+                                                        <div className="text-sm text-gray-500 mt-1 inline-flex items-center gap-3">
+                                                            {event.attendees && event.attendees.length > 0 && showOverlays && (
+                                                                <span>Attendees: {event.attendees.length}</span>
+                                                            )}
+                                                            {event.signals && event.signals.length > 0 && (
+                                                                <span className={`flex items-center gap-1 text-gray-400 ${event.attendees && event.attendees.length > 0 && showOverlays ? 'border-l border-gray-200 pl-3' : ''}`}>
+                                                                    Signals: {event.signals.length}
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                     </div>
                                                 );
                                             })}
