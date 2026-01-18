@@ -382,6 +382,7 @@ export function LifeMapView() {
                 <TimelineView
                     events={events}
                     edges={edges}
+                    showOverlays={showOverlays}
                     onSelectEvent={(ev) => {
                         if (linkingContext) {
                             handleCompleteLink(ev.id);
