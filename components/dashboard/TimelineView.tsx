@@ -32,6 +32,11 @@ type ZoomLevel = 'month' | 'week';
 export function TimelineView({ events, edges = [], onSelectEvent }: TimelineViewProps) {
     const [zoom, setZoom] = useState<ZoomLevel>('month');
     const [hoveredEventId, setHoveredEventId] = useState<string | null>(null);
+    const [mounted, setMounted] = React.useState(false);
+
+    React.useEffect(() => {
+        setMounted(true);
+    }, []);
 
     // --- Time range calculation ---
     const { startRange, endRange } = useMemo(() => {
@@ -111,6 +116,8 @@ export function TimelineView({ events, edges = [], onSelectEvent }: TimelineView
     // --- SVG rendering setup ---
     const pixelsPerPercent = zoom === 'month' ? 30 : 150;
     const timelineWidthPx = pixelsPerPercent * 100;
+
+    if (!mounted) return <div className="min-h-[500px] flex items-center justify-center text-gray-400 animate-pulse font-medium uppercase tracking-widest text-xs">Projecting...</div>;
 
     return (
         <div className="space-y-4">

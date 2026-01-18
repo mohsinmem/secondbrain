@@ -45,6 +45,7 @@ export function LifeMapView() {
     const [projection, setProjection] = useState<'list' | 'timeline'>('list');
     const [edges, setEdges] = useState<SignalEdge[]>([]);
     const [linkingContext, setLinkingContext] = useState<{ sourceEventId: string; signalId: string } | null>(null);
+    const [mounted, setMounted] = useState(false);
 
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const weekRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
@@ -138,6 +139,7 @@ export function LifeMapView() {
     }, [eventsByWeek]);
 
     useEffect(() => {
+        setMounted(true);
         fetchCalendarSources();
     }, []);
 
@@ -253,8 +255,8 @@ export function LifeMapView() {
         }
     }
 
-    if (loading) {
-        return <div className="p-8 text-center">Loading...</div>;
+    if (loading || !mounted) {
+        return <div className="p-8 text-center text-gray-400 font-medium animate-pulse">Loading Orientation Layer...</div>;
     }
 
     if (sources.length === 0) {
