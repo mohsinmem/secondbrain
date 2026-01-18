@@ -370,6 +370,14 @@ export function LifeMapView() {
                 </div>
             </div>
 
+            {projection === 'timeline' && (
+                <div className="flex justify-center">
+                    <span className="text-[10px] text-gray-400 font-medium uppercase tracking-[0.1em] bg-gray-50/50 px-3 py-1 rounded-full border border-gray-100">
+                        Vertical spacing reflects layout only — not importance.
+                    </span>
+                </div>
+            )}
+
             {projection === 'timeline' ? (
                 <TimelineView
                     events={events}
