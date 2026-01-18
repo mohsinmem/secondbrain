@@ -24,12 +24,13 @@ interface CalendarEvent {
 interface TimelineViewProps {
     events: CalendarEvent[];
     edges?: SignalEdge[];
+    showOverlays?: boolean;
     onSelectEvent: (event: CalendarEvent) => void;
 }
 
 type ZoomLevel = 'month' | 'week';
 
-export function TimelineView({ events, edges = [], onSelectEvent }: TimelineViewProps) {
+export function TimelineView({ events, edges = [], showOverlays = true, onSelectEvent }: TimelineViewProps) {
     const [zoom, setZoom] = useState<ZoomLevel>('month');
     const [hoveredEventId, setHoveredEventId] = useState<string | null>(null);
     const [mounted, setMounted] = React.useState(false);
@@ -61,7 +62,45 @@ export function TimelineView({ events, edges = [], onSelectEvent }: TimelineView
 
     const totalDuration = Math.max(endRange.getTime() - startRange.getTime(), 3600000);
 
-    // --- Lane Allocation ---
+    // --- Time Markers & Sectioning (Discrete blocks) ---
+    const sections = useMemo(() => {
+        const list = [];
+        const current = new Date(startRange);
+
+        if (zoom === 'month') {
+            current.setDate(1);
+            current.setHours(0, 0, 0, 0);
+            while (current <= endRange) {
+                const next = new Date(current);
+                next.setMonth(next.getMonth() + 1);
+                list.push({
+                    start: new Date(current),
+                    end: next,
+                    label: current.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
+                });
+                current.setMonth(current.getMonth() + 1);
+            }
+        } else {
+            // align to Monday
+            const day = current.getDay();
+            const diff = (day === 0 ? -6 : 1) - day;
+            current.setDate(current.getDate() + diff);
+            current.setHours(0, 0, 0, 0);
+            while (current <= endRange) {
+                const next = new Date(current);
+                next.setDate(next.getDate() + 7);
+                list.push({
+                    start: new Date(current),
+                    end: next,
+                    label: `Week of ${current.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+                });
+                current.setDate(current.getDate() + 7);
+            }
+        }
+        return list;
+    }, [startRange, endRange, totalDuration, zoom]);
+
+    // --- Lane Allocation & Global Mapping ---
     const { lanes, eventPositions } = useMemo(() => {
         const sorted = [...events].sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
         const lanes: CalendarEvent[][] = [];
@@ -70,8 +109,11 @@ export function TimelineView({ events, edges = [], onSelectEvent }: TimelineView
         sorted.forEach(ev => {
             const start = new Date(ev.start_at).getTime();
             const end = new Date(ev.end_at).getTime();
-            const left = ((start - startRange.getTime()) / totalDuration) * 100;
-            const width = Math.max(((end - start) / totalDuration) * 100, 0.1);
+
+            // Map to global percentage of "sections"
+            const totalSectionsWidth = sections.length * 100;
+            const globalLeft = ((start - startRange.getTime()) / totalDuration) * totalSectionsWidth;
+            const globalWidth = Math.max(((end - start) / totalDuration) * totalSectionsWidth, zoom === 'month' ? 0.3 : 0.1);
 
             let assignedLane = -1;
             for (let i = 0; i < lanes.length; i++) {
@@ -90,49 +132,11 @@ export function TimelineView({ events, edges = [], onSelectEvent }: TimelineView
                 lanes[assignedLane].push(ev);
             }
 
-            positions.set(ev.id, { lane: assignedLane, left, width });
+            positions.set(ev.id, { lane: assignedLane, left: globalLeft, width: globalWidth });
         });
 
         return { lanes, eventPositions: positions };
-    }, [events, startRange, endRange, totalDuration]);
-
-    // --- Time Markers (Sparse Anchors) ---
-    const markers = useMemo(() => {
-        const list = [];
-        const current = new Date(startRange);
-
-        if (zoom === 'month') {
-            current.setDate(1);
-            current.setHours(0, 0, 0, 0);
-            while (current <= endRange) {
-                const percent = ((current.getTime() - startRange.getTime()) / totalDuration) * 100;
-                list.push({
-                    label: current.toLocaleDateString(undefined, { month: 'short', year: 'numeric' }),
-                    percent
-                });
-                current.setMonth(current.getMonth() + 1);
-            }
-        } else {
-            // align to Monday
-            const day = current.getDay();
-            const diff = (day === 0 ? -6 : 1) - day;
-            current.setDate(current.getDate() + diff);
-            current.setHours(0, 0, 0, 0);
-            while (current <= endRange) {
-                const percent = ((current.getTime() - startRange.getTime()) / totalDuration) * 100;
-                list.push({
-                    label: `Week of ${current.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`,
-                    percent
-                });
-                current.setDate(current.getDate() + 7);
-            }
-        }
-        return list;
-    }, [startRange, endRange, totalDuration, zoom]);
-
-    // --- SVG rendering setup ---
-    const pixelsPerPercent = zoom === 'month' ? 40 : 180; // slightly wider for anchors
-    const timelineWidthPx = pixelsPerPercent * 100;
+    }, [events, startRange, endRange, totalDuration, sections, zoom]);
 
     if (!mounted) return <div className="min-h-[500px] flex items-center justify-center text-gray-400 animate-pulse font-medium uppercase tracking-widest text-xs">Projecting...</div>;
 
@@ -158,43 +162,54 @@ export function TimelineView({ events, edges = [], onSelectEvent }: TimelineView
                     </Button>
                 </div>
                 <div className="text-[10px] text-gray-400 uppercase tracking-widest font-bold pr-2 opacity-50">
-                    Spine Projection v1
+                    Spine Projection v2
                 </div>
             </div>
 
             <div className="relative border-none rounded-xl bg-white min-h-[520px]">
-                {/* Horizontal Scroll Container with Snap Control */}
+                {/* Horizontal Scroll Container (Discrete Snap) */}
                 <div
-                    className="overflow-x-auto custom-scrollbar snap-x snap-mandatory"
-                    style={{ WebkitOverflowScrolling: 'touch' }}
+                    className="overflow-x-auto custom-scrollbar snap-x snap-mandatory scroll-smooth"
+                    style={{ WebkitOverflowScrolling: 'touch', scrollBehavior: 'auto' }}
                 >
                     <div
-                        className="relative pb-12 pt-16" // Added top padding for anchors
+                        className="relative flex"
                         style={{
-                            width: `${timelineWidthPx}px`,
-                            height: `${Math.max(lanes.length * 44 + 100, 500)}px`,
+                            width: `${sections.length * 100}%`,
+                            height: `${Math.max(lanes.length * 44 + 120, 500)}px`,
                         }}
                     >
-                        {/* The Time Spine (Continuous Anchor) */}
+                        {/* THE SPINE (Global Layer) */}
                         <div
                             className="absolute left-0 right-0 h-[1.5px] bg-gray-200/40 z-0"
-                            style={{ top: '88px' }} // Adjusted for label height
+                            style={{ top: '88px' }}
                         />
 
-                        {/* Sparse High-Contrast Time Anchors (Fixed relative to spine) */}
-                        {markers.map((m, i) => (
+                        {/* DISCRETE SECTIONS (Snap Targets) */}
+                        {sections.map((s, i) => (
                             <div
                                 key={i}
-                                className="absolute top-4 bottom-0 border-l border-gray-100/40 flex flex-col pointer-events-none snap-start"
-                                style={{ left: `${m.percent}%` }}
+                                className="flex-none w-full relative snap-start border-l border-gray-100/30"
                             >
-                                <span className="text-[11px] text-black font-extrabold uppercase tracking-widest pl-2 -mt-1 bg-white/80 py-1 rounded">
-                                    {m.label}
-                                </span>
+                                {/* High-Contrast Anchor */}
+                                <div className="absolute top-4 left-4 z-30">
+                                    <span className="text-[11px] text-black font-extrabold uppercase tracking-widest bg-white/90 py-1.5 px-3 rounded-md shadow-sm border border-gray-100">
+                                        {s.label}
+                                    </span>
+                                </div>
+
+                                {/* Vertical Grid Lines (Optional Overlays) */}
+                                {showOverlays && zoom === 'week' && (
+                                    <div className="absolute inset-x-0 top-0 bottom-0 pointer-events-none flex">
+                                        {Array.from({ length: 7 }).map((_, d) => (
+                                            <div key={d} className="flex-1 border-r border-gray-50/50" />
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         ))}
 
-                        {/* SVG Layer for Latent Consequence Threads */}
+                        {/* GLOBAL SVG (Edges) */}
                         <svg
                             className="absolute inset-0 pointer-events-none z-10"
                             style={{ width: '100%', height: '100%' }}
@@ -204,20 +219,18 @@ export function TimelineView({ events, edges = [], onSelectEvent }: TimelineView
                                 const targetPos = eventPositions.get(edge.target_event_id);
                                 if (!sourcePos || !targetPos) return null;
 
-                                const x1 = (sourcePos.left + (zoom === 'month' ? 0.3 : sourcePos.width)) * 0.01 * timelineWidthPx;
-                                const y1 = sourcePos.lane * 44 + 70 + (zoom === 'month' ? 4 : 18);
-                                const x2 = targetPos.left * 0.01 * timelineWidthPx;
-                                const y2 = targetPos.lane * 44 + 70 + (zoom === 'month' ? 4 : 18);
+                                const y1 = sourcePos.lane * 44 + 70 + (zoom === 'month' ? 18 : 18);
+                                const y2 = targetPos.lane * 44 + 70 + (zoom === 'month' ? 18 : 18);
 
                                 const isHighlighted = hoveredEventId === edge.source_event_id || hoveredEventId === edge.target_event_id;
 
-                                const cp1x = x1 + (x2 - x1) * 0.5;
-                                const cp2x = x1 + (x2 - x1) * 0.5;
+                                const cp1x = sourcePos.left + (targetPos.left - sourcePos.left) * 0.5;
+                                const cp2x = sourcePos.left + (targetPos.left - sourcePos.left) * 0.5;
 
                                 return (
                                     <path
                                         key={edge.id}
-                                        d={`M ${x1} ${y1} C ${cp1x} ${y1}, ${cp2x} ${y2}, ${x2} ${y2}`}
+                                        d={`M ${sourcePos.left + (zoom === 'month' ? 0.3 : sourcePos.width)}% ${y1} C ${cp1x}% ${y1}, ${cp2x}% ${y2}, ${targetPos.left}% ${y2}`}
                                         stroke="#94a3b8"
                                         strokeWidth="1"
                                         fill="none"
@@ -228,23 +241,23 @@ export function TimelineView({ events, edges = [], onSelectEvent }: TimelineView
                             })}
                         </svg>
 
-                        {/* Events: Semantic Zoom (Dots or Cards) */}
+                        {/* GLOBAL PROJECTS (Events) */}
                         {events.map((ev) => {
                             const pos = eventPositions.get(ev.id);
                             if (!pos) return null;
 
                             if (zoom === 'month') {
-                                // DOTS VIEW
                                 return (
                                     <button
                                         key={ev.id}
                                         onClick={() => onSelectEvent(ev)}
                                         onMouseEnter={() => setHoveredEventId(ev.id)}
                                         onMouseLeave={() => setHoveredEventId(null)}
-                                        className="absolute h-2 w-2 rounded-full bg-gray-300 hover:bg-gray-900 transition-all z-20 group"
+                                        className="absolute h-2.5 w-2.5 rounded-full bg-gray-400/80 hover:bg-gray-900 transition-all z-20 group"
                                         style={{
                                             left: `${pos.left}%`,
-                                            top: `${pos.lane * 44 + 84}px`
+                                            top: `${pos.lane * 44 + 83}px`,
+                                            transform: 'translateX(-50%)'
                                         }}
                                         aria-label={ev.title}
                                     >
@@ -255,7 +268,6 @@ export function TimelineView({ events, edges = [], onSelectEvent }: TimelineView
                                 );
                             }
 
-                            // CARDS VIEW (WEEK)
                             return (
                                 <button
                                     key={ev.id}
@@ -274,7 +286,7 @@ export function TimelineView({ events, edges = [], onSelectEvent }: TimelineView
                                         <span className="text-[10px] font-medium text-gray-500 truncate flex-1 leading-tight group-hover:text-gray-900">
                                             {ev.title}
                                         </span>
-                                        {ev.signals && ev.signals.length > 0 && (
+                                        {ev.signals && ev.signals.length > 0 && showOverlays && (
                                             <div className="shrink-0 flex items-center gap-1 opacity-50">
                                                 <span className="text-[8px] text-gray-400 font-bold bg-gray-50 px-1 rounded border border-gray-200">
                                                     {ev.signals.length}
@@ -296,7 +308,7 @@ export function TimelineView({ events, edges = [], onSelectEvent }: TimelineView
             </div>
 
             <div className="text-[9px] text-gray-300 uppercase tracking-[0.2em] text-center px-4 leading-relaxed font-medium opacity-60">
-                Life Spine Orientation · Discovered Meaning · Phase 3.1
+                Spine Orientation · Discovery Mode · AFERR Phase 3.1
             </div>
         </div>
     );
