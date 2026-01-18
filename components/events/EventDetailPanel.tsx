@@ -43,9 +43,10 @@ interface DurableSignal {
 interface EventDetailPanelProps {
     event: CalendarEvent | null;
     onClose: () => void;
+    onStartLinking?: (signalId: string) => void;
 }
 
-export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
+export function EventDetailPanel({ event, onClose, onStartLinking }: EventDetailPanelProps) {
     const [contexts, setContexts] = useState<EventContext[]>([]);
     const [loading, setLoading] = useState(false);
     const [isAddingNote, setIsAddingNote] = useState(false);
@@ -309,16 +310,28 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                         </div>
                         <div className="space-y-3">
                             {linkedSignals.map(signal => (
-                                <div key={signal.id} className="p-3 border rounded-lg bg-gray-50/50 flex items-start gap-3">
-                                    <span className="text-lg opacity-40">●</span>
-                                    <div className="space-y-1">
-                                        <div className="text-sm font-medium text-gray-900">{signal.label}</div>
-                                        {signal.description && (
-                                            <div className="text-xs text-gray-500 leading-relaxed truncate max-w-[280px]">
-                                                {signal.description}
-                                            </div>
-                                        )}
+                                <div key={signal.id} className="p-3 border rounded-lg bg-gray-50/50 flex items-start justify-between gap-3 group">
+                                    <div className="flex items-start gap-3">
+                                        <span className="text-lg opacity-40">●</span>
+                                        <div className="space-y-1">
+                                            <div className="text-sm font-medium text-gray-900">{signal.label}</div>
+                                            {signal.description && (
+                                                <div className="text-xs text-gray-500 leading-relaxed truncate max-w-[200px]">
+                                                    {signal.description}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
+                                    {onStartLinking && (
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-7 px-2 text-[9px] font-bold uppercase tracking-tighter text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap"
+                                            onClick={() => onStartLinking(signal.id)}
+                                        >
+                                            Link →
+                                        </Button>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -456,10 +469,10 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                     <section className="space-y-6 pt-6 border-t border-gray-100">
                         <div className="flex items-center justify-between">
                             <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">
-                                Emerging Hypotheses
+                                Emerging Observations
                             </h3>
                             <span className="text-[10px] text-gray-400 font-bold bg-gray-50 px-2 py-0.5 rounded uppercase tracking-widest border border-gray-100">
-                                AI Proposed
+                                Proposed
                             </span>
                         </div>
 
@@ -467,7 +480,7 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                             {draftCandidates.length === 0 ? (
                                 <div className="p-4 rounded-lg bg-gray-50/50 border border-dashed border-gray-200 text-center">
                                     <p className="text-xs text-gray-500 mb-3 leading-relaxed">
-                                        No active hypotheses. Propose candidates based on<br />the attached context.
+                                        No active observations. Propose observations based on<br />the attached context.
                                     </p>
                                     <Button
                                         variant="outline"
@@ -476,7 +489,7 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                                         onClick={handleExtractSignals}
                                         disabled={extracting}
                                     >
-                                        {extracting ? 'Proposing...' : 'Propose Signal Candidates'}
+                                        {extracting ? 'Observing...' : 'Propose Observations'}
                                     </Button>
                                 </div>
                             ) : (
@@ -550,7 +563,7 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                                         onClick={handleExtractSignals}
                                         disabled={extracting}
                                     >
-                                        {extracting ? 'Refreshing...' : 'Re-run Hypothesis Engine'}
+                                        {extracting ? 'Refreshing...' : 'Re-run Observation Engine'}
                                     </Button>
                                 </div>
                             )}

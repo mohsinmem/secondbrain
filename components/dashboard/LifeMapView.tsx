@@ -5,6 +5,15 @@ import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { EventDetailPanel } from '@/components/events/EventDetailPanel';
+import { TimelineView } from './TimelineView';
+
+interface SignalEdge {
+    id: string;
+    source_event_id: string;
+    signal_id: string;
+    target_event_id: string;
+    edge_type: string;
+}
 
 interface CalendarEvent {
     id: string;
@@ -33,6 +42,9 @@ export function LifeMapView() {
     const [showOverlays, setShowOverlays] = useState(true);
     const [activeWeekKey, setActiveWeekKey] = useState<string | null>(null);
     const [uploadingFile, setUploadingFile] = useState(false);
+    const [projection, setProjection] = useState<'list' | 'timeline'>('list');
+    const [edges, setEdges] = useState<SignalEdge[]>([]);
+    const [linkingContext, setLinkingContext] = useState<{ sourceEventId: string; signalId: string } | null>(null);
 
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const weekRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
@@ -132,8 +144,22 @@ export function LifeMapView() {
     useEffect(() => {
         if (selectedSource) {
             fetchEvents(selectedSource);
+            fetchEdges();
         }
     }, [selectedSource]);
+
+    async function fetchEdges() {
+        try {
+            const supabase = createClient();
+            const { data, error } = await supabase
+                .from('signal_edges')
+                .select('*');
+            if (error) throw error;
+            setEdges(data || []);
+        } catch (error) {
+            console.error('Error fetching edges:', error);
+        }
+    }
 
     async function fetchCalendarSources() {
         try {
@@ -263,6 +289,32 @@ export function LifeMapView() {
         );
     }
 
+    async function handleCompleteLink(targetEventId: string) {
+        if (!linkingContext) return;
+        try {
+            const response = await fetch('/api/signals/edges', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    source_event_id: linkingContext.sourceEventId,
+                    signal_id: linkingContext.signalId,
+                    target_event_id: targetEventId
+                })
+            });
+            const result = await response.json();
+            if (response.ok) {
+                alert('Consequence thread created');
+                fetchEdges();
+            } else {
+                alert(`Link failed: ${result.error || 'Check chronological guardrail'}`);
+            }
+        } catch (error: any) {
+            alert(`Link error: ${error.message}`);
+        } finally {
+            setLinkingContext(null);
+        }
+    }
+
     return (
         <div className="space-y-6">
             {/* Header Controls */}
@@ -295,159 +347,213 @@ export function LifeMapView() {
                     >
                         {showOverlays ? 'Hide' : 'Show'} Overlays
                     </Button>
-                </div>
-            </div>
-
-            {/* Overview Strip (Orientation Navigation Only) */}
-            <div className="flex items-center justify-between gap-3 bg-gray-50 p-3 rounded border">
-                <div className="text-sm font-medium text-gray-600 shrink-0">
-                    Jump to week
-                </div>
-
-                <div className="flex-1 overflow-x-auto no-scrollbar">
-                    <div className="flex gap-2 py-1">
-                        {eventsByWeek.map((g) => {
-                            const isActive = g.key === activeWeekKey;
-                            return (
-                                <button
-                                    key={g.key}
-                                    type="button"
-                                    onClick={() => {
-                                        const target = weekRefs.current[g.key];
-                                        if (target && scrollContainerRef.current) {
-                                            scrollContainerRef.current.scrollTo({
-                                                top: target.offsetTop - 8,
-                                                behavior: 'smooth',
-                                            });
-                                        }
-                                    }}
-                                    className={[
-                                        "shrink-0 rounded border px-3 py-1 text-xs font-medium transition-colors",
-                                        isActive
-                                            ? "border-gray-900 bg-gray-900 text-white"
-                                            : "border-gray-300 bg-white text-gray-600 hover:border-gray-400 hover:bg-gray-50"
-                                    ].join(" ")}
-                                    aria-label={`Jump to week starting ${formatWeekCompact(g.weekStart)}`}
-                                >
-                                    {formatWeekCompact(g.weekStart)}
-                                </button>
-                            );
-                        })}
+                    <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200 gap-1">
+                        <Button
+                            variant={projection === 'list' ? 'default' : 'ghost'}
+                            size="sm"
+                            className="h-8 text-[11px] font-bold uppercase tracking-widest px-4"
+                            onClick={() => setProjection('list')}
+                        >
+                            List
+                        </Button>
+                        <Button
+                            variant={projection === 'timeline' ? 'default' : 'ghost'}
+                            size="sm"
+                            className="h-8 text-[11px] font-bold uppercase tracking-widest px-4"
+                            onClick={() => setProjection('timeline')}
+                        >
+                            Timeline
+                        </Button>
                     </div>
                 </div>
             </div>
 
-            {/* Simple Timeline View */}
-            <Card className="p-0 overflow-hidden">
-                <div className="">
-                    {events.length === 0 ? (
-                        <p className="text-gray-500 text-center py-8">No events found</p>
-                    ) : (
-                        <div ref={scrollContainerRef} className="max-h-[700px] overflow-y-auto custom-scrollbar">
-                            {eventsByWeek.map((group) => {
-                                const count = group.items.length;
-
-                                // Neutral density bar: fixed max width, no gradients, no "heat"
-                                const maxBars = 12;
-                                const bars = Math.min(maxBars, Math.round(count / 3));
-
-                                return (
-                                    <div
-                                        key={group.key}
-                                        ref={(el) => { weekRefs.current[group.key] = el; }}
-                                        className="border-b last:border-b-0"
-                                    >
-                                        {/* Sticky week header */}
-                                        <div
-                                            data-week-header="true"
-                                            data-week-key={group.key}
-                                            className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b px-4 py-2 flex items-center justify-between"
-                                        >
-                                            <div className="text-sm font-medium text-gray-900">
-                                                Week: {formatRangeLabel(group.weekStart)}
-                                            </div>
-
-                                            {/* Descriptive only: count + small bar */}
-                                            {showOverlays && (
-                                                <div className="flex items-center gap-3">
-                                                    <div className="text-xs text-gray-600">{count} events</div>
-                                                    <div className="flex gap-1" aria-label={`Week density: ${count} events`}>
-                                                        {Array.from({ length: bars }).map((_, i) => (
-                                                            <div key={i} className="h-2 w-2 rounded-sm bg-gray-300" />
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Week events */}
-                                        <div className="p-2 space-y-2">
-                                            {group.items.map((event) => {
-                                                const startDate = new Date(event.start_at);
-                                                const endDate = new Date(event.end_at);
-                                                const duration = (endDate.getTime() - startDate.getTime()) / (1000 * 60); // minutes
-
-                                                return (
-                                                    <div
-                                                        key={event.id}
-                                                        onClick={() => setSelectedEvent(event)}
-                                                        className="border rounded p-3 hover:shadow-md transition-shadow cursor-pointer bg-white"
-                                                    >
-                                                        <div className="font-medium">{event.title}</div>
-                                                        <div className="text-sm text-gray-600 mt-1">
-                                                            {startDate.toLocaleDateString()} at{' '}
-                                                            {startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                                            {duration > 0 && ` · ${Math.round(duration)}min`}
-                                                        </div>
-
-                                                        {event.location && (
-                                                            <div className="text-sm text-gray-500 mt-1">📍 {event.location}</div>
-                                                        )}
-
-                                                        <div className="text-sm text-gray-500 mt-1 inline-flex items-center gap-3">
-                                                            {event.attendees && event.attendees.length > 0 && showOverlays && (
-                                                                <span>Attendees: {event.attendees.length}</span>
-                                                            )}
-                                                            {event.signals && event.signals.length > 0 && (
-                                                                <span className={`flex items-center gap-1 text-gray-400 ${event.attendees && event.attendees.length > 0 && showOverlays ? 'border-l border-gray-200 pl-3' : ''}`}>
-                                                                    Signals: {event.signals.length}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                );
-                            })}
+            {projection === 'timeline' ? (
+                <TimelineView
+                    events={events}
+                    edges={edges}
+                    onSelectEvent={(ev) => {
+                        if (linkingContext) {
+                            handleCompleteLink(ev.id);
+                        } else {
+                            setSelectedEvent(ev);
+                        }
+                    }}
+                />
+            ) : (
+                <>
+                    {/* Overview Strip (Orientation Navigation Only) */}
+                    <div className="flex items-center justify-between gap-3 bg-gray-50 p-3 rounded border">
+                        <div className="text-sm font-medium text-gray-600 shrink-0">
+                            Jump to week
                         </div>
-                    )}
-                </div>
-            </Card>
 
-            {/* Placeholder for future map visualization */}
-            {showOverlays && events.length > 0 && (
-                <Card className="p-6 bg-blue-50 border-blue-200">
-                    <div className="text-sm text-blue-800">
-                        <strong>Coming soon:</strong> Visual timeline with clustering, themes, and reflection zones.
-                        For now, this list view shows your event structure chronologically.
+                        <div className="flex-1 overflow-x-auto no-scrollbar">
+                            <div className="flex gap-2 py-1">
+                                {eventsByWeek.map((g) => {
+                                    const isActive = g.key === activeWeekKey;
+                                    return (
+                                        <button
+                                            key={g.key}
+                                            type="button"
+                                            onClick={() => {
+                                                const target = weekRefs.current[g.key];
+                                                if (target && scrollContainerRef.current) {
+                                                    scrollContainerRef.current.scrollTo({
+                                                        top: target.offsetTop - 8,
+                                                        behavior: 'smooth',
+                                                    });
+                                                }
+                                            }}
+                                            className={[
+                                                "shrink-0 rounded border px-3 py-1 text-xs font-medium transition-colors",
+                                                isActive
+                                                    ? "border-gray-900 bg-gray-900 text-white"
+                                                    : "border-gray-300 bg-white text-gray-600 hover:border-gray-400 hover:bg-gray-50"
+                                            ].join(" ")}
+                                            aria-label={`Jump to week starting ${formatWeekCompact(g.weekStart)}`}
+                                        >
+                                            {formatWeekCompact(g.weekStart)}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
                     </div>
-                </Card>
+
+                    {/* Simple Timeline View (Canonical List) */}
+                    <Card className="p-0 overflow-hidden">
+                        <div className="">
+                            {events.length === 0 ? (
+                                <p className="text-gray-500 text-center py-8">No events found</p>
+                            ) : (
+                                <div ref={scrollContainerRef} className="max-h-[700px] overflow-y-auto custom-scrollbar">
+                                    {eventsByWeek.map((group) => {
+                                        const count = group.items.length;
+
+                                        // Neutral density bar: fixed max width, no gradients, no "heat"
+                                        const maxBars = 12;
+                                        const bars = Math.min(maxBars, Math.round(count / 3));
+
+                                        return (
+                                            <div
+                                                key={group.key}
+                                                ref={(el) => { weekRefs.current[group.key] = el; }}
+                                                className="border-b last:border-b-0"
+                                            >
+                                                {/* Sticky week header */}
+                                                <div
+                                                    data-week-header="true"
+                                                    data-week-key={group.key}
+                                                    className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b px-4 py-2 flex items-center justify-between"
+                                                >
+                                                    <div className="text-sm font-medium text-gray-900">
+                                                        Week: {formatRangeLabel(group.weekStart)}
+                                                    </div>
+
+                                                    {/* Descriptive only: count + small bar */}
+                                                    {showOverlays && (
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="text-xs text-gray-600">{count} events</div>
+                                                            <div className="flex gap-1" aria-label={`Week density: ${count} events`}>
+                                                                {Array.from({ length: bars }).map((_, i) => (
+                                                                    <div key={i} className="h-2 w-2 rounded-sm bg-gray-300" />
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                {/* Week events */}
+                                                <div className="p-2 space-y-2">
+                                                    {group.items.map((event) => {
+                                                        const startDate = new Date(event.start_at);
+                                                        const endDate = new Date(event.end_at);
+                                                        const duration = (endDate.getTime() - startDate.getTime()) / (1000 * 60); // minutes
+
+                                                        return (
+                                                            <div
+                                                                key={event.id}
+                                                                onClick={() => setSelectedEvent(event)}
+                                                                className="border rounded p-3 hover:shadow-md transition-shadow cursor-pointer bg-white"
+                                                            >
+                                                                <div className="font-medium">{event.title}</div>
+                                                                <div className="text-sm text-gray-600 mt-1">
+                                                                    {startDate.toLocaleDateString()} at{' '}
+                                                                    {startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                                    {duration > 0 && ` · ${Math.round(duration)}min`}
+                                                                </div>
+
+                                                                {event.location && (
+                                                                    <div className="text-sm text-gray-500 mt-1">📍 {event.location}</div>
+                                                                )}
+
+                                                                <div className="text-sm text-gray-500 mt-1 inline-flex items-center gap-3">
+                                                                    {event.attendees && event.attendees.length > 0 && showOverlays && (
+                                                                        <span>Attendees: {event.attendees.length}</span>
+                                                                    )}
+                                                                    {event.signals && event.signals.length > 0 && (
+                                                                        <span className={`flex items-center gap-1 text-gray-400 ${event.attendees && event.attendees.length > 0 && showOverlays ? 'border-l border-gray-200 pl-3' : ''}`}>
+                                                                            Signals: {event.signals.length}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    </Card>
+                </>
             )}
 
             {/* Event Detail Panel Overlay */}
-            {selectedEvent && (
-                <>
-                    <div
-                        className="fixed inset-0 bg-black/40 z-40 animate-in fade-in"
-                        onClick={() => setSelectedEvent(null)}
-                    />
-                    <EventDetailPanel
-                        event={selectedEvent}
-                        onClose={() => setSelectedEvent(null)}
-                    />
-                </>
+            {
+                selectedEvent && (
+                    <>
+                        <div
+                            className="fixed inset-0 bg-black/40 z-40 animate-in fade-in"
+                            onClick={() => {
+                                setSelectedEvent(null);
+                                setLinkingContext(null);
+                            }}
+                        />
+                        <EventDetailPanel
+                            event={selectedEvent}
+                            onClose={() => {
+                                setSelectedEvent(null);
+                                setLinkingContext(null);
+                            }}
+                            onStartLinking={(signalId) => {
+                                setLinkingContext({ sourceEventId: selectedEvent.id, signalId });
+                                setSelectedEvent(null); // Close panel to allow map selection
+                            }}
+                        />
+                    </>
+                )
+            }
+            {linkingContext && (
+                <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-4 animate-in slide-in-from-bottom-4">
+                    <span className="text-sm font-bold uppercase tracking-widest text-gray-300">
+                        Linking Mode
+                    </span>
+                    <span className="text-xs text-gray-400 border-l border-gray-700 pl-4">
+                        Select a future event on the map to anchor this consequence
+                    </span>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-white hover:text-red-400 h-8 text-xs font-bold uppercase tracking-widest"
+                        onClick={() => setLinkingContext(null)}
+                    >
+                        Cancel
+                    </Button>
+                </div>
             )}
         </div>
     );
