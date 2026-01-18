@@ -146,7 +146,7 @@ export function TimelineView({ events, edges = [], onSelectEvent }: TimelineView
                         className="h-7 text-[10px] uppercase font-bold tracking-widest px-3"
                         onClick={() => setZoom('month')}
                     >
-                        Month
+                        Dense (Month)
                     </Button>
                     <Button
                         variant={zoom === 'week' ? 'secondary' : 'ghost'}
@@ -154,7 +154,7 @@ export function TimelineView({ events, edges = [], onSelectEvent }: TimelineView
                         className="h-7 text-[10px] uppercase font-bold tracking-widest px-3"
                         onClick={() => setZoom('week')}
                     >
-                        Week
+                        Sparse (Week)
                     </Button>
                 </div>
                 <div className="text-[10px] text-gray-400 uppercase tracking-widest font-bold pr-2 opacity-50">
