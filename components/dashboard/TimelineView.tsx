@@ -241,32 +241,80 @@ export function TimelineView({ events, edges = [], showOverlays = true, onSelect
                             })}
                         </svg>
 
-                        {/* GLOBAL PROJECTS (Events) */}
-                        {events.map((ev) => {
-                            const pos = eventPositions.get(ev.id);
-                            if (!pos) return null;
+                        {/* AGGREGATION LAYERS (Month Mode: Week Bundles) */}
+                        {zoom === 'month' && sections.map((monthSection, mIdx) => {
+                            // Break month into ~4 week chunks for bundles
+                            const weekChunks = [];
+                            const current = new Date(monthSection.start);
+                            // align to Monday or start of month
 
-                            if (zoom === 'month') {
+                            while (current < monthSection.end) {
+                                const chunkStart = new Date(current);
+                                const chunkEnd = new Date(current);
+                                chunkEnd.setDate(current.getDate() + 7);
+                                if (chunkEnd > monthSection.end) chunkEnd.setTime(monthSection.end.getTime());
+
+                                weekChunks.push({ start: chunkStart, end: chunkEnd });
+                                current.setDate(current.getDate() + 7);
+                            }
+
+                            return weekChunks.map((week, wIdx) => {
+                                const weekEvents = events.filter(ev => {
+                                    const evStart = new Date(ev.start_at).getTime();
+                                    return evStart >= week.start.getTime() && evStart < week.end.getTime();
+                                });
+
+                                if (weekEvents.length === 0) return null;
+
+                                const label = `${week.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}–${week.end.getDate()}`;
+
                                 return (
                                     <button
-                                        key={ev.id}
-                                        onClick={() => onSelectEvent(ev)}
-                                        onMouseEnter={() => setHoveredEventId(ev.id)}
-                                        onMouseLeave={() => setHoveredEventId(null)}
-                                        className="absolute h-2.5 w-2.5 rounded-full bg-gray-400/80 hover:bg-gray-900 transition-all z-20 group"
-                                        style={{
-                                            left: `${pos.left}%`,
-                                            top: `${pos.lane * 44 + 83}px`,
-                                            transform: 'translateX(-50%)'
+                                        key={`week-bundle-${mIdx}-${wIdx}`}
+                                        onClick={() => {
+                                            setZoom('week');
+                                            // Slight timeout to allow render, then scroll
+                                            setTimeout(() => {
+                                                const weekSectionIdx = Math.floor((week.start.getTime() - startRange.getTime()) / (7 * 24 * 60 * 60 * 1000));
+                                                // We need to find the Week Mode section corresponding to this date
+                                                // Simplest way: finding the element by ID or calculating width
+                                                const container = document.querySelector('.snap-x');
+                                                if (container) {
+                                                    const sectionWidth = container.clientWidth; // 100% width
+                                                    container.scrollTo({ left: weekSectionIdx * sectionWidth, behavior: 'smooth' });
+                                                }
+                                            }, 100);
                                         }}
-                                        aria-label={ev.title}
+                                        className="absolute h-6 rounded-full bg-white border border-gray-200 shadow-sm hover:border-gray-400 hover:shadow-md transition-all z-20 group flex items-center justify-center px-3 gap-2"
+                                        style={{
+                                            // Position based on % of the MONTH section width
+                                            // Each month section is 100% relative to PARENT (which is N * 100% wide)
+                                            // Wait, the parent loop `sections.map` iterates over month sections.
+                                            // "left" here is relative to the *entire timeline*.
+                                            // monthSection.start -> global start diff
+                                            left: `${((week.start.getTime() - startRange.getTime()) / totalDuration) * (sections.length * 100) + 1.5}%`,
+                                            // +1.5% nudge to center in the visual week slot if needed, or 
+                                            // Use strict math: (weekStart - globalStart) / globalDur * 100%
+                                            // Wait, sections.length * 100 is the width of inner container.
+                                            top: '86px',
+                                        }}
                                     >
-                                        <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-gray-900 text-white text-[9px] px-2 py-1 rounded whitespace-nowrap z-50">
-                                            {ev.title}
-                                        </div>
+                                        <span className="text-[10px] uppercase font-bold text-gray-400 group-hover:text-gray-900 tracking-wider">
+                                            {label}
+                                        </span>
+                                        <div className="h-3 w-[1px] bg-gray-200"></div>
+                                        <span className="text-[10px] font-bold text-gray-600 group-hover:text-black">
+                                            {weekEvents.length}
+                                        </span>
                                     </button>
                                 );
-                            }
+                            });
+                        })}
+
+                        {/* GLOBAL PROJECTS (Events: Week Mode Only) */}
+                        {zoom === 'week' && events.map((ev) => {
+                            const pos = eventPositions.get(ev.id);
+                            if (!pos) return null;
 
                             return (
                                 <button
