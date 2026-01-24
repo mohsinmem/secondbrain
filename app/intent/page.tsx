@@ -27,12 +27,14 @@ export default function IntentPage() {
     const [resultCards, setResultCards] = useState<IntentCard[]>([]);
     const [intentId, setIntentId] = useState<string | null>(null);
     const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+    const [error, setError] = useState<string | null>(null);
 
     const handleRunIntent = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!query.trim()) return;
 
         setLoading(true);
+        setError(null);
         setResultCards([]);
         setIntentId(null);
 
@@ -43,13 +45,17 @@ export default function IntentPage() {
                 body: JSON.stringify({ query, horizon_days: 21 }),
             });
 
-            if (!res.ok) throw new Error('Failed to run intent');
-
             const data = await res.json();
+
+            if (!res.ok) {
+                throw new Error(data.error || 'Failed to run intent');
+            }
+
             setIntentId(data.intent_id);
             setResultCards(data.cards || []);
-        } catch (error) {
+        } catch (error: any) {
             console.error(error);
+            setError(error.message || 'Something went wrong');
         } finally {
             setLoading(false);
         }
@@ -112,6 +118,11 @@ export default function IntentPage() {
                             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
                         </Button>
                     </form>
+                    {error && (
+                        <div className="text-red-500 text-sm bg-red-50 p-3 rounded-md animate-in fade-in">
+                            {error}
+                        </div>
+                    )}
                 </div>
 
                 {/* Results Grid */}
