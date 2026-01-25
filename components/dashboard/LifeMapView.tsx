@@ -2,10 +2,12 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { EventDetailPanel } from '@/components/events/EventDetailPanel';
 import { TimelineView } from './TimelineView';
+import { ActiveIntentBanner } from './ActiveIntentBanner';
 
 interface SignalEdge {
     id: string;
@@ -46,6 +48,10 @@ export function LifeMapView() {
     const [edges, setEdges] = useState<SignalEdge[]>([]);
     const [linkingContext, setLinkingContext] = useState<{ sourceEventId: string; signalId: string } | null>(null);
     const [mounted, setMounted] = useState(false);
+
+    // Read URL params for deep-linking
+    const searchParams = useSearchParams();
+    const startParam = searchParams.get('start');
 
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const weekRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
@@ -137,6 +143,31 @@ export function LifeMapView() {
 
         return () => observer.disconnect();
     }, [eventsByWeek]);
+
+    // Deep-Link Scroll Logic
+    useEffect(() => {
+        if (!startParam || eventsByWeek.length === 0 || projection !== 'list' || !scrollContainerRef.current) return;
+
+        // Give a slight delay for rendering to complete (especially refs assignment)
+        setTimeout(() => {
+            // Strict Equality Match
+            const targetWeek = eventsByWeek.find(g => g.key === startParam);
+
+            if (targetWeek && weekRefs.current[targetWeek.key]) {
+                weekRefs.current[targetWeek.key]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } else {
+                // Fallback: Find next available week
+                // Simple alphanumeric comparison of ISO date strings works
+                const nextWeek = eventsByWeek.find(g => g.key > startParam);
+                if (nextWeek && weekRefs.current[nextWeek.key]) {
+                    weekRefs.current[nextWeek.key]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    // Optional toast here if we had a toast system
+                    console.log(`Deep-link target ${startParam} not found. Jumped to next available: ${nextWeek.key}`);
+                }
+            }
+        }, 300);
+
+    }, [startParam, eventsByWeek, projection]);
 
     useEffect(() => {
         setMounted(true);
@@ -319,6 +350,8 @@ export function LifeMapView() {
 
     return (
         <div className="space-y-6">
+            <ActiveIntentBanner />
+
             {/* Header Controls */}
             <div className="flex items-center justify-between">
                 <div>
@@ -410,8 +443,12 @@ export function LifeMapView() {
                                             onClick={() => {
                                                 const target = weekRefs.current[g.key];
                                                 if (target && scrollContainerRef.current) {
+                                                    // This uses the explicit container scroll, not window scroll
+                                                    // Our deep-link logic uses .scrollIntoView() which handles parent containers mostly,
+                                                    // but explicitly finding the scroll container is safer for manual jumps.
+                                                    const top = target.offsetTop - (scrollContainerRef.current.offsetTop);
                                                     scrollContainerRef.current.scrollTo({
-                                                        top: target.offsetTop - 8,
+                                                        top: top - 8,
                                                         behavior: 'smooth',
                                                     });
                                                 }
@@ -450,12 +487,13 @@ export function LifeMapView() {
                                             <div
                                                 key={group.key}
                                                 ref={(el) => { weekRefs.current[group.key] = el; }}
-                                                className="border-b last:border-b-0"
+                                                className="border-b last:border-b-0 scroll-mt-24" // scroll-scroll-margin to account for sticky header if using window scroll, though we are in container
                                             >
-                                                {/* Sticky week header */}
+                                                {/* Sticky week header - Added data-week-start for strict contract */}
                                                 <div
                                                     data-week-header="true"
                                                     data-week-key={group.key}
+                                                    data-week-start={group.key} // Contract: YYYY-MM-DD
                                                     className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b px-4 py-2 flex items-center justify-between"
                                                 >
                                                     <div className="text-sm font-medium text-gray-900">

@@ -80,14 +80,12 @@ export default function IntentPage() {
 
     const handleNavigate = (card: IntentCard) => {
         // Contract A: Start must be MONDAY (local timezone)
-        // The API might return Monday, but let's strictly enforce it here just in case,
-        // or assume API contract is valid. API sends ISO.
-        // Let's rely on the window.start provided by API since API logic enforced Monday.
         const startISO = card.payload_json.window.start;
         const startDate = startISO.split('T')[0]; // simple YYYY-MM-DD
 
         // Navigate
-        router.push(`/dashboard?mode=timeline&zoom=week&start=${startDate}`);
+        const intentQuery = intentId ? `&intent_id=${intentId}` : '';
+        router.push(`/dashboard?mode=list${intentQuery}&start=${startDate}`);
     };
 
     return (
