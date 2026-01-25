@@ -76,10 +76,25 @@ export function LifeMapView() {
         const weekEnd = new Date(weekStart);
         weekEnd.setDate(weekEnd.getDate() + 6);
 
-        const start = `${weekStart.getFullYear()}-${pad2(weekStart.getMonth() + 1)}-${pad2(weekStart.getDate())}`;
-        const end = `${weekEnd.getFullYear()}-${pad2(weekEnd.getMonth() + 1)}-${pad2(weekEnd.getDate())}`;
+        const startMonth = weekStart.toLocaleDateString(undefined, { month: 'short' });
+        const endMonth = weekEnd.toLocaleDateString(undefined, { month: 'short' });
+        const startDay = weekStart.getDate();
+        const endDay = weekEnd.getDate();
+        const startYear = weekStart.getFullYear();
+        const endYear = weekEnd.getFullYear();
 
-        return `${start} → ${end}`;
+        // Same month and year: "Jan 12 – 18, 2026"
+        if (startMonth === endMonth && startYear === endYear) {
+            return `${startMonth} ${startDay} – ${endDay}, ${startYear}`;
+        }
+
+        // Different months, same year: "Jan 30 – Feb 5, 2026"
+        if (startYear === endYear) {
+            return `${startMonth} ${startDay} – ${endMonth} ${endDay}, ${startYear}`;
+        }
+
+        // Different years: "Dec 29, 2025 – Jan 4, 2026"
+        return `${startMonth} ${startDay}, ${startYear} – ${endMonth} ${endDay}, ${endYear}`;
     }
 
     function formatWeekCompact(weekStart: Date) {
