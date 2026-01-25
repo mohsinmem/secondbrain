@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/card';
 import { EventDetailPanel } from '@/components/events/EventDetailPanel';
 import { TimelineView } from './TimelineView';
 import { ActiveIntentBanner } from './ActiveIntentBanner';
+import { IntentContextPanel } from './IntentContextPanel';
 
 interface SignalEdge {
     id: string;
@@ -366,6 +367,17 @@ export function LifeMapView() {
     return (
         <div className="space-y-6">
             <ActiveIntentBanner />
+
+            {/* Intent Context Panel - Shows orientation when coming from Intent Mode */}
+            {searchParams.get('intent_card_type') && searchParams.get('intent_query') && projection === 'list' && (
+                <IntentContextPanel
+                    intentType={searchParams.get('intent_card_type') as 'forecast' | 'reflection'}
+                    intentQuery={searchParams.get('intent_query') || ''}
+                    weekStart={startParam || ''}
+                    weekEnd={searchParams.get('week_end') || ''}
+                    eventCount={parseInt(searchParams.get('event_count') || '0')}
+                />
+            )}
 
             {/* Header Controls */}
             <div className="flex items-center justify-between">

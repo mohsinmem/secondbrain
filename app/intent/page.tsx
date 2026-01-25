@@ -81,11 +81,14 @@ export default function IntentPage() {
     const handleNavigate = (card: IntentCard) => {
         // Contract A: Start must be MONDAY (local timezone)
         const startISO = card.payload_json.window.start;
+        const endISO = card.payload_json.window.end;
         const startDate = startISO.split('T')[0]; // simple YYYY-MM-DD
+        const endDate = endISO.split('T')[0];
 
-        // Navigate
+        // Navigate with full context metadata for orientation panel
         const intentQuery = intentId ? `&intent_id=${intentId}` : '';
-        router.push(`/dashboard?mode=list${intentQuery}&start=${startDate}`);
+        const contextParams = `&intent_card_type=${card.type}&intent_query=${encodeURIComponent(query)}&week_end=${endDate}&event_count=0`;
+        router.push(`/dashboard?mode=list${intentQuery}&start=${startDate}${contextParams}`);
     };
 
     return (
