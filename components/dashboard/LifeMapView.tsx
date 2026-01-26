@@ -104,19 +104,26 @@ export function LifeMapView() {
 
     const [reprocessed, setReprocessed] = useState(false);
     const [report, setReport] = useState<any>(null);
+    const [systemError, setSystemError] = useState<string | null>(null);
 
     async function handleReprocess(forceSync: boolean = false) {
         setLoading(true);
+        setSystemError(null);
         try {
             const res = await fetch(`/api/calendar/reprocess${forceSync ? '?force=true' : ''}`);
             const data = await res.json();
-            if (data.success) {
-                setReport(data.report);
-                setReprocessed(true);
-                await fetchHubs();
+
+            if (!res.ok || !data.success) {
+                setSystemError(data.error || 'Clustering Engine Failure');
+                return;
             }
-        } catch (error) {
+
+            setReport(data.report);
+            setReprocessed(true);
+            await fetchHubs();
+        } catch (error: any) {
             console.error('Reprocess failed', error);
+            setSystemError(error.message || 'Network error during reprocessing');
         } finally {
             setLoading(false);
         }
@@ -128,8 +135,41 @@ export function LifeMapView() {
         <div className="space-y-6">
             <ActiveIntentBanner />
 
+            {/* System Error Toast (Directive: Telemetry & Error Propagation) */}
+            {systemError && (
+                <Card className="p-4 bg-red-50 border-red-200 text-red-900 shadow-sm animate-in fade-in slide-in-from-top-4 duration-300">
+                    <div className="flex items-start gap-3">
+                        <div className="bg-red-100 p-2 rounded-full mt-0.5">
+                            <Info className="h-4 w-4 text-red-600" />
+                        </div>
+                        <div className="space-y-1">
+                            <h3 className="text-sm font-bold uppercase tracking-wider">System Orientation Failure</h3>
+                            <p className="text-xs font-mono bg-white/50 p-2 rounded border border-red-100 break-all leading-relaxed">
+                                {systemError}
+                            </p>
+                            <div className="flex gap-4 pt-2">
+                                <Button
+                                    variant="ghost"
+                                    className="p-0 h-auto text-[10px] font-bold uppercase tracking-widest text-red-600 hover:text-red-700"
+                                    onClick={() => window.open('/api/diagnostics/hubs', '_blank')}
+                                >
+                                    Open Deep Diagnostics
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    className="p-0 h-auto text-[10px] font-bold uppercase tracking-widest text-red-400 hover:text-red-500"
+                                    onClick={() => setSystemError(null)}
+                                >
+                                    Dismiss
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </Card>
+            )}
+
             {/* Integrity Report (Directive: Semantic Coverage & Integrity Report) */}
-            {report && (
+            {report && !systemError && (
                 <Card className="p-4 bg-gray-900 text-white border-0 shadow-2xl overflow-hidden relative">
                     <div className="absolute top-0 right-0 p-4 opacity-10">
                         <BrainCircuit className="h-20 w-20" />
