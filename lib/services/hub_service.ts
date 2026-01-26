@@ -1,5 +1,5 @@
 /**
- * Hub-and-Spoke Engine (Work Order 6.0 - Sovereign Brain)
+ * Hub-and-Spoke Engine (Work Order 6.0.5 - Sovereign Brain)
  */
 
 import { createServerSupabaseClient } from '@/lib/supabase/server';
@@ -69,7 +69,7 @@ function extractEntities(events: any[]): { people: string[], orgs: string[] } {
  * Sovereign Brain Sensemaking
  */
 function findSuperAnchors(transcripts: any[], start: Date, end: Date, weights: Record<string, number>): string[] {
-    const keywords = ['AFERR', 'PSDC', 'Evivve', 'Bangkok', 'TaskUs', 'Mapletree', 'Manila', 'Philippines'];
+    const keywords = ['AFERR', 'PSDC', 'Evivve', 'Bangkok', 'TaskUs', 'Mapletree', 'Manila', 'Philippines', 'TaskUs Inc'];
     const found: { keyword: string, weight: number }[] = [];
 
     const relevantTranscripts = transcripts.filter(t => {
@@ -78,7 +78,7 @@ function findSuperAnchors(transcripts: any[], start: Date, end: Date, weights: R
     });
 
     relevantTranscripts.forEach(t => {
-        const text = t.raw_text?.toLowerCase() || '';
+        const text = (t.raw_text || '').toLowerCase();
         keywords.forEach(k => {
             if (text.includes(k.toLowerCase())) {
                 const weight = weights[k] || 50;
@@ -87,24 +87,41 @@ function findSuperAnchors(transcripts: any[], start: Date, end: Date, weights: R
         });
     });
 
-    // Sort by weight descending
     return Array.from(new Set(found.sort((a, b) => b.weight - a.weight).map(f => f.keyword)));
 }
 
 /**
- * Semantic Salience Helper (With Strategic Weighting)
+ * Multi-Intent Disambiguation (Work Order 6.0.5)
+ * Detects collisions between Entity and Location.
+ */
+function detectCollision(hubEntities: { orgs: string[] }, hubTitle: string, weights: Record<string, number>): { entity: string | null, location: string | null } {
+    const highWeightEntities = hubEntities.orgs.filter(org => (weights[org] || 50) > 70);
+    const locationKeywords = ['PSDC', 'Manila', 'Bangkok', 'Penang', 'AC Hotel'];
+
+    const detectedLocation = locationKeywords.find(loc => hubTitle.includes(loc));
+    const detectedEntity = highWeightEntities.length > 0 ? highWeightEntities[0] : null;
+
+    if (detectedLocation && detectedEntity) {
+        return { entity: detectedEntity, location: detectedLocation };
+    }
+
+    return { entity: null, location: null };
+}
+
+/**
+ * Semantic Salience Helper (With Multi-Intent Disambiguation)
  */
 function deriveSovereignTitle(events: any[], anchors: HubAnchor[], superAnchors: string[], weights: Record<string, number>): string {
-    // 1. STRATEGIC OVERRIDE (Directive: Multi-Source Sensemaking)
+    // 1. SUPER-ANCHORS
     if (superAnchors.length > 0) {
-        const primary = superAnchors[0]; // Already sorted by weight
+        const primary = superAnchors[0];
         if (primary === 'TaskUs') return `TaskUs Strategic Engagement`;
         if (primary === 'Philippines' || primary === 'Manila') return `Philippines Facilitation (Evivve)`;
         if (primary === 'Bangkok') return `Bangkok Strategic Sync`;
         return `${primary} Strategic Hub`;
     }
 
-    // 2. ORG WEIGHTING FROM EVENTS
+    // 2. ORG WEIGHTING
     const entities = extractEntities(events);
     if (entities.orgs.length > 0) {
         const weightedOrgs = entities.orgs.map(org => ({ org, weight: weights[org] || 50 }))
@@ -136,7 +153,6 @@ export async function processContextHubs(userId: string) {
 
     if (!events || events.length === 0) return 0;
 
-    // Convert weights to record
     const weights: Record<string, number> = {};
     priorityData?.forEach(p => { weights[p.keyword] = p.weight; });
 
@@ -164,7 +180,7 @@ export async function processContextHubs(userId: string) {
             location: ev.location
         }));
 
-    // 5. Clustering Loop (Work Order 6.0)
+    // 5. Clustering Loop
     const hubsPrepared: any[] = [];
     let currentHub: any = null;
 
@@ -198,7 +214,7 @@ export async function processContextHubs(userId: string) {
     });
     if (currentHub) hubsPrepared.push(currentHub);
 
-    // 6. Enrichment & Sovereignty
+    // 6. Enrichment & Sovereignty & Disambiguation (Work Order 6.0.5)
     for (const hub of hubsPrepared) {
         const associatedEvents = activeEvents.filter(e =>
             new Date(e.start_at) >= hub.start && new Date(e.end_at) <= hub.end
@@ -209,11 +225,19 @@ export async function processContextHubs(userId: string) {
 
         hub.title = deriveSovereignTitle(associatedEvents, anchors.filter(a => hub.anchorIds.includes(a.eventId)), superAnchors, weights);
         hub.eventCount = associatedEvents.length;
+
+        // COLLISION DETECTION (Work Order 6.0.5)
+        const collision = detectCollision(entities, hub.title, weights);
+
         hub.metadata = {
             ...entities,
             super_anchors: superAnchors,
             priority_shift: Object.keys(weights).length > 0,
-            reset_at: new Date().toISOString()
+            reset_at: new Date().toISOString(),
+            // Multi-Intent Metadata
+            needs_disambiguation: !!collision.entity,
+            collision_entity: collision.entity,
+            collision_location: collision.location
         };
     }
 
@@ -261,11 +285,13 @@ export async function generateIntegrityReport(userId: string) {
         const { data: hubs } = await supabase.from('context_hubs').select('metadata').eq('user_id', userId);
         const totalPeople = new Set(hubs?.flatMap(h => h.metadata?.people || [])).size;
         const totalOrgs = new Set(hubs?.flatMap(h => h.metadata?.orgs || [])).size;
+        const needsDisambiguation = hubs?.filter(h => h.metadata?.needs_disambiguation).length || 0;
 
         return {
             people_nodes: totalPeople,
             organization_nodes: totalOrgs,
-            status: 'Sovereign Brain v6.0 Active'
+            collisions_detected: needsDisambiguation,
+            status: 'Sovereign Brain v6.0.5 Active'
         };
     } catch (e) {
         return null;

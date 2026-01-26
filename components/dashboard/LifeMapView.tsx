@@ -18,6 +18,7 @@ import { ActiveIntentBanner } from './ActiveIntentBanner';
 import { ContextHubFeed } from './ContextHubFeed';
 import { SwipeInterface } from '@/components/reflection/SwipeInterface';
 import { StrategicPriorityCloud } from './StrategicPriorityCloud';
+import { StrategicGapReport } from './StrategicGapReport';
 import { BrainCircuit, LayoutList, Calendar as CalendarIcon, Info, Settings2 } from 'lucide-react';
 
 interface ContextHub {
@@ -28,6 +29,7 @@ interface ContextHub {
     end_at: string;
     items_count: number;
     description?: string;
+    metadata?: any;
 }
 
 export function LifeMapView() {
@@ -158,6 +160,36 @@ export function LifeMapView() {
         }
     }
 
+    async function handleResolveCollision(hubId: string, choice: 'merge' | 'split') {
+        const supabase = createClient();
+
+        if (choice === 'merge') {
+            // Simply mark as disambiguated and update title if needed
+            const hub = hubs.find(h => h.id === hubId);
+            const newTitle = `${hub?.metadata?.collision_entity} Session at ${hub?.metadata?.collision_location}`;
+
+            await supabase
+                .from('context_hubs')
+                .update({
+                    title: newTitle,
+                    metadata: { ...hub?.metadata, needs_disambiguation: false }
+                })
+                .eq('id', hubId);
+        } else {
+            // Split choice: In a real implementation, this would trigger a split-rebuild.
+            // For now, we clear the flag to remove it from the report and let the user rename.
+            const hub = hubs.find(h => h.id === hubId);
+            await supabase
+                .from('context_hubs')
+                .update({
+                    metadata: { ...hub?.metadata, needs_disambiguation: false }
+                })
+                .eq('id', hubId);
+        }
+
+        await fetchHubs();
+    }
+
     if (loading || !mounted) return <div className="p-8 text-center text-gray-400 font-medium animate-pulse">Initializing Associative Context...</div>;
 
     return (
@@ -286,7 +318,13 @@ export function LifeMapView() {
 
             {/* Main Content Area */}
             {viewMode === 'hubs' ? (
-                <div className="space-y-4">
+                <div className="space-y-6">
+                    {/* Directive: Strategic Gap (Collision) Report */}
+                    <StrategicGapReport
+                        hubs={hubs as any}
+                        onResolve={handleResolveCollision}
+                    />
+
                     {!reprocessed && hubs.length === 0 && (
                         <div className="p-10 border-2 border-dashed border-gray-100 rounded-2xl text-center space-y-4 bg-gray-50/30">
                             <div className="bg-blue-50 h-12 w-12 rounded-full flex items-center justify-center mx-auto border border-blue-100">
