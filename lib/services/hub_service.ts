@@ -134,7 +134,7 @@ export async function generateIntegrityReport(userId: string) {
 
     const { data: events } = await supabase
         .from('calendar_events')
-        .select('id, metadata, hub_id')
+        .select('id, metadata, hub_id, start_at')
         .eq('user_id', userId);
 
     if (!events) return null;
@@ -151,7 +151,7 @@ export async function generateIntegrityReport(userId: string) {
         // Group floating events by day and see where they cluster
         const dailyPulse: Record<string, number> = {};
         floatingEvents.forEach(e => {
-            const day = e.metadata?.start_at?.split('T')[0] || 'Unknown';
+            const day = e.start_at?.split('T')[0] || 'Unknown';
             dailyPulse[day] = (dailyPulse[day] || 0) + 1;
         });
         gapsCount = Object.values(dailyPulse).filter(count => count > 3).length;
