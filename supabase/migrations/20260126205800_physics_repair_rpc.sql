@@ -7,6 +7,7 @@
 -- by using SECURITY DEFINER. User isolation is maintained via auth.uid().
 
 CREATE OR REPLACE FUNCTION public.apply_hub_linkage(
+    p_user_id uuid,
     target_hub_id uuid, 
     envelope_start timestamptz, 
     envelope_end timestamptz
@@ -15,19 +16,19 @@ RETURNS void AS $$
 BEGIN
     UPDATE public.calendar_events
     SET hub_id = target_hub_id
-    WHERE user_id = auth.uid()  -- VITAL: Preserve user isolation
-    AND start_at AT TIME ZONE 'UTC' >= envelope_start AT TIME ZONE 'UTC'
-    AND end_at AT TIME ZONE 'UTC' <= envelope_end AT TIME ZONE 'UTC';
+    WHERE user_id = p_user_id  -- Explicit parameter for server-side reliability
+    AND (start_at AT TIME ZONE 'UTC') >= (envelope_start AT TIME ZONE 'UTC')
+    AND (end_at AT TIME ZONE 'UTC') <= (envelope_end AT TIME ZONE 'UTC');
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- RPC for clearing hub links (Bypasses RLS via SECURITY DEFINER)
-CREATE OR REPLACE FUNCTION public.clear_hub_linkage()
+CREATE OR REPLACE FUNCTION public.clear_hub_linkage(p_user_id uuid)
 RETURNS void AS $$
 BEGIN
     UPDATE public.calendar_events
     SET hub_id = null
-    WHERE user_id = auth.uid();
+    WHERE user_id = p_user_id;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

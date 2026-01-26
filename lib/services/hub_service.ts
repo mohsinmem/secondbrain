@@ -55,12 +55,11 @@ export async function processContextHubs(userId: string) {
 
     // 1.5. Clear existing hub links for a fresh run
     try {
-        // PHYSICS REPAIR (Work Order 5.7): Call SECURITY DEFINER RPC to bypass RLS
-        const { error: clearError } = await supabase.rpc('clear_hub_linkage');
+        // PHYSICS REPAIR (Work Order 5.10): Pass userId explicitly
+        const { error: clearError } = await supabase.rpc('clear_hub_linkage', { p_user_id: userId });
         if (clearError) throw clearError;
     } catch (e) {
         await logError(supabase, userId, 'Failed to clear old hub links via RPC', e);
-        // Continue anyway? Or stop? Let's stop to be safe.
         throw new Error('Physics Error: Cannot reset relational network links.');
     }
 
@@ -168,6 +167,7 @@ export async function processContextHubs(userId: string) {
 
             const { error: linkError } = await supabase
                 .rpc('apply_hub_linkage', {
+                    p_user_id: userId,
                     target_hub_id: hub.id,
                     envelope_start: envelopeStart.toISOString(),
                     envelope_end: envelopeEnd.toISOString()
