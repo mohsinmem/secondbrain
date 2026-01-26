@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { syncGoogleCalendar } from '@/lib/services/calendar_sync';
 
-export async function POST(req: NextRequest) {
+async function handleSync(req: NextRequest) {
     try {
         const supabase = await createServerSupabaseClient();
         const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -54,4 +54,12 @@ export async function POST(req: NextRequest) {
         console.error('Manual sync error:', error);
         return NextResponse.json({ error: error.message || 'Failed to sync calendar' }, { status: 500 });
     }
+}
+
+export async function GET(req: NextRequest) {
+    return handleSync(req);
+}
+
+export async function POST(req: NextRequest) {
+    return handleSync(req);
 }
