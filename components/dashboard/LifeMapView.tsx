@@ -17,12 +17,13 @@ import { TimelineView } from './TimelineView';
 import { ActiveIntentBanner } from './ActiveIntentBanner';
 import { ContextHubFeed } from './ContextHubFeed';
 import { SwipeInterface } from '@/components/reflection/SwipeInterface';
-import { BrainCircuit, LayoutList, Calendar as CalendarIcon, Info } from 'lucide-react';
+import { StrategicPriorityCloud } from './StrategicPriorityCloud';
+import { BrainCircuit, LayoutList, Calendar as CalendarIcon, Info, Settings2 } from 'lucide-react';
 
 interface ContextHub {
     id: string;
     title: string;
-    type: 'travel' | 'project' | 'anchor';
+    type: 'travel' | 'project' | 'anchor' | 'intent';
     start_at: string;
     end_at: string;
     items_count: number;
@@ -34,6 +35,7 @@ export function LifeMapView() {
     const [events, setEvents] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [viewMode, setViewMode] = useState<'hubs' | 'raw' | 'swipe'>('hubs');
+    const [showPriorityCloud, setShowPriorityCloud] = useState(false);
     const [activeHubId, setActiveHubId] = useState<string | null>(null);
     const [candidates, setCandidates] = useState<any[]>([]);
     const [mounted, setMounted] = useState(false);
@@ -129,6 +131,33 @@ export function LifeMapView() {
         }
     }
 
+    async function handleNuclearReset() {
+        if (!confirm('NUCLEAR RESET: This will wipe ALL existing hubs and rebuild your relational network from scratch using the Sovereign Brain logic. Are you ready to burn the state?')) {
+            return;
+        }
+
+        setLoading(true);
+        setSystemError(null);
+        try {
+            const res = await fetch('/api/hubs/reset', { method: 'POST' });
+            const data = await res.json();
+
+            if (!res.ok || !data.success) {
+                setSystemError(data.error || 'Nuclear Reset Failed');
+                return;
+            }
+
+            setReport(data.report);
+            setReprocessed(true);
+            await fetchHubs();
+        } catch (error: any) {
+            console.error('Nuclear Reset failed', error);
+            setSystemError(error.message || 'Network error during reset');
+        } finally {
+            setLoading(false);
+        }
+    }
+
     if (loading || !mounted) return <div className="p-8 text-center text-gray-400 font-medium animate-pulse">Initializing Associative Context...</div>;
 
     return (
@@ -217,26 +246,43 @@ export function LifeMapView() {
                     </p>
                 </div>
                 {viewMode !== 'swipe' && (
-                    <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200 gap-1">
+                    <div className="flex items-center gap-3">
                         <Button
-                            variant={viewMode === 'hubs' ? 'default' : 'ghost'}
+                            variant="outline"
                             size="sm"
-                            className="h-8 text-[11px] font-bold uppercase tracking-widest px-4"
-                            onClick={() => setViewMode('hubs')}
+                            className={`h-8 text-[10px] font-bold uppercase tracking-widest gap-2 ${showPriorityCloud ? 'border-blue-500 text-blue-600 bg-blue-50' : 'text-gray-400'}`}
+                            onClick={() => setShowPriorityCloud(!showPriorityCloud)}
                         >
-                            Hubs
+                            <Settings2 className="h-3.5 w-3.5" />
+                            Strategic Alignment
                         </Button>
-                        <Button
-                            variant={viewMode === 'raw' ? 'default' : 'ghost'}
-                            size="sm"
-                            className="h-8 text-[11px] font-bold uppercase tracking-widest px-4"
-                            onClick={() => setViewMode('raw')}
-                        >
-                            Raw
-                        </Button>
+
+                        <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200 gap-1">
+                            <Button
+                                variant={viewMode === 'hubs' ? 'default' : 'ghost'}
+                                size="sm"
+                                className="h-8 text-[11px] font-bold uppercase tracking-widest px-4"
+                                onClick={() => setViewMode('hubs')}
+                            >
+                                Hubs
+                            </Button>
+                            <Button
+                                variant={viewMode === 'raw' ? 'default' : 'ghost'}
+                                size="sm"
+                                className="h-8 text-[11px] font-bold uppercase tracking-widest px-4"
+                                onClick={() => setViewMode('raw')}
+                            >
+                                Raw
+                            </Button>
+                        </div>
                     </div>
                 )}
             </div>
+
+            {/* Strategic Priority Cloud Overlay */}
+            {showPriorityCloud && (
+                <StrategicPriorityCloud onClose={() => setShowPriorityCloud(false)} />
+            )}
 
             {/* Main Content Area */}
             {viewMode === 'hubs' ? (
@@ -291,7 +337,7 @@ export function LifeMapView() {
 
             {/* Reprocess Trigger (Footer) */}
             {(reprocessed || hubs.length > 0) && (
-                <div className="pt-10 flex border-t border-gray-100 justify-center">
+                <div className="pt-10 flex flex-col items-center gap-4 border-t border-gray-100">
                     <Button
                         variant="ghost"
                         size="sm"
@@ -299,6 +345,16 @@ export function LifeMapView() {
                         onClick={() => handleReprocess(false)}
                     >
                         Refresh Hub Logic
+                    </Button>
+
+                    {/* Directive: The Nuclear Reset Button */}
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-[10px] text-red-300 hover:text-red-600 hover:bg-red-50 font-bold uppercase tracking-[0.3em] transition-all"
+                        onClick={handleNuclearReset}
+                    >
+                        ☢️ Nuclear Reset (Wipe & Rebuild)
                     </Button>
                 </div>
             )}

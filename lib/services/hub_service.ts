@@ -1,8 +1,5 @@
 /**
- * Hub-and-Spoke Engine (Work Order 5)
- * 
- * Responsible for clustering raw calendar events into "Contextual Hubs"
- * using anchor detection and temporal envelopes.
+ * Hub-and-Spoke Engine (Work Order 6.0 - Sovereign Brain)
  */
 
 import { createServerSupabaseClient } from '@/lib/supabase/server';
@@ -12,8 +9,9 @@ interface HubAnchor {
     title: string;
     start: Date;
     end: Date;
-    type: 'travel' | 'project' | 'anchor';
+    type: 'travel' | 'project' | 'anchor' | 'strategic';
     location?: string;
+    keywords?: string[];
 }
 
 /**
@@ -31,132 +29,130 @@ async function logError(supabase: any, userId: string, message: string, error: a
 }
 
 /**
- * Cadence Filter (Work Order 5.16)
- * Detects weekly/daily patterns to shunt routine events.
+ * Relational Entity Extraction
  */
-function isRoutineEvent(ev: any, allEvents: any[]): boolean {
-    const title = ev.title?.toLowerCase() || '';
+function extractEntities(events: any[]): { people: string[], orgs: string[] } {
+    const peopleSet = new Set<string>();
+    const orgsSet = new Set<string>();
 
-    // 1. Explicit recurrence metadata
-    if (ev.metadata?.recurring === true || ev.metadata?.recurrence) return true;
+    const STRATEGIC_ORGS = ['TaskUs', 'Mapletree', 'PSDC', 'AFERR', 'Evivve', 'TaskUs Inc'];
 
-    // 2. Pattern detection (3+ occurrences with same title in window)
-    const matches = allEvents.filter(e => e.title?.toLowerCase() === title);
-    if (matches.length >= 4) return true;
+    events.forEach(e => {
+        if (e.attendees && Array.isArray(e.attendees)) {
+            e.attendees.forEach((email: string) => {
+                const name = email.split('@')[0].replace('.', ' ');
+                const formattedName = name.replace(/\b\w/g, l => l.toUpperCase());
+                peopleSet.add(formattedName);
 
-    return false;
+                const domain = email.split('@')[1]?.toLowerCase();
+                if (domain) {
+                    STRATEGIC_ORGS.forEach(org => {
+                        if (domain.includes(org.toLowerCase())) orgsSet.add(org);
+                    });
+                }
+            });
+        }
+
+        const content = `${e.title} ${e.description || ''}`;
+        STRATEGIC_ORGS.forEach(org => {
+            if (content.toLowerCase().includes(org.toLowerCase())) orgsSet.add(org);
+        });
+    });
+
+    return {
+        people: Array.from(peopleSet),
+        orgs: Array.from(orgsSet)
+    };
 }
 
 /**
- * Guest-List Rule (Work Order 5.16)
- * Shunts solo generic events like "Dinner" to routine.
+ * Sovereign Brain Sensemaking
  */
-function isSoloGeneric(ev: any): boolean {
-    const title = ev.title?.toLowerCase() || '';
-    const genericTerms = ['dinner', 'lunch', 'breakfast', 'coffee', 'meeting', 'sync', 'call'];
+function findSuperAnchors(transcripts: any[], start: Date, end: Date, weights: Record<string, number>): string[] {
+    const keywords = ['AFERR', 'PSDC', 'Evivve', 'Bangkok', 'TaskUs', 'Mapletree', 'Manila', 'Philippines'];
+    const found: { keyword: string, weight: number }[] = [];
 
-    const isGeneric = genericTerms.some(term => title.includes(term));
-    const attendeeCount = ev.metadata?.attendees?.length || 0;
+    const relevantTranscripts = transcripts.filter(t => {
+        const tDate = new Date(t.created_at);
+        return tDate >= start && tDate <= end;
+    });
 
-    // If generic and no attendees (other than user), it's solo
-    return isGeneric && attendeeCount <= 1;
+    relevantTranscripts.forEach(t => {
+        const text = t.raw_text?.toLowerCase() || '';
+        keywords.forEach(k => {
+            if (text.includes(k.toLowerCase())) {
+                const weight = weights[k] || 50;
+                found.push({ keyword: k, weight });
+            }
+        });
+    });
+
+    // Sort by weight descending
+    return Array.from(new Set(found.sort((a, b) => b.weight - a.weight).map(f => f.keyword)));
 }
 
 /**
- * Semantic Salience Helper (Work Order 5.15/5.16)
+ * Semantic Salience Helper (With Strategic Weighting)
  */
-function deriveSovereignTitle(events: any[], anchors: HubAnchor[]): string {
-    // 1. RECOVERY OVERRIDE: Targeted Scans (Work Order 5.16)
-    const hasPhilippines = events.some(e => e.title?.toLowerCase().includes('philippines') || e.title?.toLowerCase().includes('manila') || e.title?.toLowerCase().includes('evivve'));
-    if (hasPhilippines) return "Philippines Facilitation (Evivve)";
+function deriveSovereignTitle(events: any[], anchors: HubAnchor[], superAnchors: string[], weights: Record<string, number>): string {
+    // 1. STRATEGIC OVERRIDE (Directive: Multi-Source Sensemaking)
+    if (superAnchors.length > 0) {
+        const primary = superAnchors[0]; // Already sorted by weight
+        if (primary === 'TaskUs') return `TaskUs Strategic Engagement`;
+        if (primary === 'Philippines' || primary === 'Manila') return `Philippines Facilitation (Evivve)`;
+        if (primary === 'Bangkok') return `Bangkok Strategic Sync`;
+        return `${primary} Strategic Hub`;
+    }
 
-    const hasKL = anchors.some(a => a.location?.toLowerCase().includes('kuala lumpur') || a.title?.toLowerCase().includes('kl stay') || a.title?.toLowerCase().includes('trip.com'));
-    if (hasKL) return "Kuala Lumpur Stay";
+    // 2. ORG WEIGHTING FROM EVENTS
+    const entities = extractEntities(events);
+    if (entities.orgs.length > 0) {
+        const weightedOrgs = entities.orgs.map(org => ({ org, weight: weights[org] || 50 }))
+            .sort((a, b) => b.weight - a.weight);
+        if (weightedOrgs[0].weight > 70) {
+            return `${weightedOrgs[0].org} Focused Hub`;
+        }
+    }
 
-    // 2. ANCHOR FIRST
+    // 3. ANCHOR FIRST
     if (anchors.length > 0) {
         const primary = anchors[0];
         const prefix = primary.type === 'travel' ? 'Stay at' : 'Focus on';
         return `${prefix} ${primary.title}`;
     }
 
-    // 3. SALIENCE SCAN (TF-IDF Inspired)
-    const STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'your', 'from', 'call', 'meeting', 'sync', 'daily', 'standup', 'activity', 'pulse', 'intensive']);
-    const wordCounts: Record<string, number> = {};
-
-    events.forEach(e => {
-        const words = (e.title || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/);
-        words.forEach((w: string) => {
-            if (w.length > 3 && !STOP_WORDS.has(w)) {
-                wordCounts[w] = (wordCounts[w] || 0) + 1;
-            }
-        });
-    });
-
-    const winners = Object.entries(wordCounts).sort((a, b) => b[1] - a[1]);
-
-    if (winners.length > 0 && winners[0][1] >= 2) {
-        const keyword = winners[0][0].charAt(0).toUpperCase() + winners[0][0].slice(1);
-        return `${keyword} Cluster`;
-    }
-
     return "Requires Intent";
-}
-
-/**
- * Terminal Proof Logger
- */
-function logSemanticProof(hubs: any[]) {
-    console.log('\n===== SEMANTIC PROOF REPORT (WO 5.16) =====');
-    console.table(hubs.map(h => ({
-        'Target ID': h.id?.substring(0, 8) || 'PRE-PERSIST',
-        'Found Events': h.eventCount || '?',
-        'Anchor Detected': h.anchorIds.length > 0 ? 'YES' : 'NONE',
-        'Proposed Human Name': h.title,
-        'Type': h.type
-    })));
-    console.log('============================================\n');
 }
 
 export async function processContextHubs(userId: string) {
     const supabase = await createServerSupabaseClient();
 
-    // 1. Fetch all events for the user
-    let events;
-    try {
-        const { data, error: fetchError } = await supabase
-            .from('calendar_events')
-            .select('*')
-            .eq('user_id', userId)
-            .order('start_at', { ascending: true });
+    // 1. Fetch Events, Transcripts & Strategic Weights
+    const [{ data: events }, { data: transcripts }, { data: priorityData }] = await Promise.all([
+        supabase.from('calendar_events').select('*').eq('user_id', userId).order('start_at', { ascending: true }),
+        supabase.from('raw_conversations').select('*').eq('user_id', userId),
+        supabase.from('keyword_priorities').select('keyword, weight').eq('user_id', userId)
+    ]);
 
-        if (fetchError) throw fetchError;
-        events = data;
-    } catch (e) {
-        await logError(supabase, userId, 'Failed to fetch events for clustering', e);
-        return;
-    }
+    if (!events || events.length === 0) return 0;
 
-    if (!events || events.length === 0) {
-        console.log('[Hub Engine] No events found to process.');
-        return;
-    }
+    // Convert weights to record
+    const weights: Record<string, number> = {};
+    priorityData?.forEach(p => { weights[p.keyword] = p.weight; });
 
-    // 1.5. Administrative Reset
-    try {
-        const { error: clearError } = await supabase.rpc('clear_hub_linkage', { p_user_id: userId });
-        if (clearError) throw clearError;
-    } catch (e) {
-        await logError(supabase, userId, 'Failed to clear old hub links via RPC', e);
-        throw new Error('Physics Error: Cannot reset relational network links.');
-    }
+    // 2. Administrative Reset
+    await supabase.rpc('clear_hub_linkage', { p_user_id: userId });
 
-    // 2. CADENCE FILTERING (Work Order 5.16)
-    // Separate routine events from semantic clusters
-    const routineEvents = events.filter(ev => isRoutineEvent(ev, events) || isSoloGeneric(ev));
-    const activeEvents = events.filter(ev => !routineEvents.includes(ev));
+    // 3. Cadence & Guest Filtering
+    const routineEvents = events.filter(e => {
+        const isRecurring = e.metadata?.recurring === true;
+        const isSoloGeneric = ['dinner', 'lunch', 'meeting'].some(t => e.title.toLowerCase().includes(t)) &&
+            (!e.attendees || e.attendees.length <= 1);
+        return isRecurring || isSoloGeneric;
+    });
+    const activeEvents = events.filter(e => !routineEvents.includes(e));
 
-    // 3. Step 1: Anchor Extraction (Gravity Wells)
+    // 4. Initial Anchors (Gravity Wells)
     const anchors: HubAnchor[] = activeEvents
         .filter(ev => ev.metadata?.is_anchor === true)
         .map(ev => ({
@@ -168,100 +164,60 @@ export async function processContextHubs(userId: string) {
             location: ev.location
         }));
 
-    // 4. Step 2: Temporal & Semantic Clustering (Work Order 5.16)
+    // 5. Clustering Loop (Work Order 6.0)
     const hubsPrepared: any[] = [];
+    let currentHub: any = null;
 
-    try {
-        // Phase 1: Anchored Blocks
-        let currentHub: any = null;
-        anchors.forEach(anchor => {
-            if (!currentHub) {
+    anchors.forEach(anchor => {
+        if (!currentHub) {
+            currentHub = {
+                type: anchor.type,
+                start: anchor.start,
+                end: anchor.end,
+                anchorIds: [anchor.eventId],
+                location: anchor.location
+            };
+        } else {
+            const gap = anchor.start.getTime() - currentHub.end.getTime();
+            const sameLoc = anchor.location && currentHub.location && anchor.location.includes(currentHub.location);
+
+            if (gap < 2 * 24 * 60 * 60 * 1000 && sameLoc) {
+                currentHub.end = anchor.end;
+                currentHub.anchorIds.push(anchor.eventId);
+            } else {
+                hubsPrepared.push(currentHub);
                 currentHub = {
-                    title: '',
                     type: anchor.type,
                     start: anchor.start,
                     end: anchor.end,
-                    anchorIds: [anchor.eventId]
+                    anchorIds: [anchor.eventId],
+                    location: anchor.location
                 };
-            } else {
-                const gap = anchor.start.getTime() - currentHub.end.getTime();
-                // STRICT GEOFENCING: Split if gap > 2 days OR location changes significantly
-                const isNewLocation = anchor.location && currentHub.location && !anchor.location.includes(currentHub.location);
-
-                if (gap < 2 * 24 * 60 * 60 * 1000 && !isNewLocation) {
-                    currentHub.end = anchor.end;
-                    currentHub.anchorIds.push(anchor.eventId);
-                } else {
-                    hubsPrepared.push(currentHub);
-                    currentHub = {
-                        title: '',
-                        type: anchor.type,
-                        start: anchor.start,
-                        end: anchor.end,
-                        anchorIds: [anchor.eventId],
-                        location: anchor.location
-                    };
-                }
             }
-        });
-        if (currentHub) hubsPrepared.push(currentHub);
-
-        // Phase 2: Floating Clusters (Dec/Jan Manila Recovery)
-        const floatingEvents = activeEvents.filter(ev => !anchors.some(a => a.eventId === ev.id));
-        const dailyPulse: Record<string, any[]> = {};
-        floatingEvents.forEach(ev => {
-            const day = ev.start_at.split('T')[0];
-            if (!dailyPulse[day]) dailyPulse[day] = [];
-            dailyPulse[day].push(ev);
-        });
-
-        Object.entries(dailyPulse).forEach(([day, cluster]) => {
-            if (cluster.length >= 3) { // Lowered threshold to catch transitions
-                hubsPrepared.push({
-                    title: '',
-                    type: 'intent',
-                    start: new Date(cluster[0].start_at),
-                    end: new Date(cluster[cluster.length - 1].end_at),
-                    anchorIds: []
-                });
-            }
-        });
-
-        // Phase 3: ROUTINE BUCKET (Work Order 5.16)
-        if (routineEvents.length > 0) {
-            hubsPrepared.push({
-                title: "Daily Routine & Background",
-                type: 'routine',
-                start: new Date(routineEvents[0].start_at),
-                end: new Date(routineEvents[routineEvents.length - 1].end_at),
-                anchorIds: [],
-                isRoutine: true
-            });
         }
+    });
+    if (currentHub) hubsPrepared.push(currentHub);
 
-        // Step 4: APPLY SOVEREIGN NAMING
-        hubsPrepared.forEach(hub => {
-            if (hub.isRoutine) {
-                hub.eventCount = routineEvents.length;
-                return;
-            }
-            const associatedEvents = activeEvents.filter(e =>
-                new Date(e.start_at) >= hub.start && new Date(e.end_at) <= hub.end
-            );
-            const hubAnchors = anchors.filter(a => hub.anchorIds.includes(a.eventId));
-            hub.title = deriveSovereignTitle(associatedEvents, hubAnchors);
-            hub.eventCount = associatedEvents.length;
-        });
+    // 6. Enrichment & Sovereignty
+    for (const hub of hubsPrepared) {
+        const associatedEvents = activeEvents.filter(e =>
+            new Date(e.start_at) >= hub.start && new Date(e.end_at) <= hub.end
+        );
 
-        // 📝 OUTPUT RECOVERY PROOF
-        logSemanticProof(hubsPrepared);
+        const superAnchors = findSuperAnchors(transcripts || [], hub.start, hub.end, weights);
+        const entities = extractEntities(associatedEvents);
 
-    } catch (e) {
-        await logError(supabase, userId, 'Failed during Sovereign Clustering', e);
-        throw e;
+        hub.title = deriveSovereignTitle(associatedEvents, anchors.filter(a => hub.anchorIds.includes(a.eventId)), superAnchors, weights);
+        hub.eventCount = associatedEvents.length;
+        hub.metadata = {
+            ...entities,
+            super_anchors: superAnchors,
+            priority_shift: Object.keys(weights).length > 0,
+            reset_at: new Date().toISOString()
+        };
     }
 
-    // 5. Step 3: Persistence
+    // 7. Persistence
     let linkageCount = 0;
     for (const hubData of hubsPrepared) {
         try {
@@ -270,36 +226,26 @@ export async function processContextHubs(userId: string) {
                 .upsert({
                     user_id: userId,
                     title: hubData.title,
-                    type: hubData.type === 'routine' ? 'anchor' : hubData.type,
+                    type: hubData.type,
                     start_at: hubData.start.toISOString(),
                     end_at: hubData.end.toISOString(),
-                    metadata: { anchors: hubData.anchorIds, is_routine: hubData.isRoutine }
+                    metadata: hubData.metadata
                 }, { onConflict: 'user_id, title, start_at' })
                 .select('id')
                 .single();
 
             if (hubError) throw hubError;
 
-            // Link events
-            const envelopeStart = new Date(hubData.start.getTime() - (6 * 60 * 60 * 1000));
-            const envelopeEnd = new Date(hubData.end.getTime() + (6 * 60 * 60 * 1000));
+            const { error: linkError } = await supabase.rpc('apply_hub_linkage', {
+                p_user_id: userId,
+                target_hub_id: hub.id,
+                envelope_start: new Date(hubData.start.getTime() - (6 * 60 * 60 * 1000)).toISOString(),
+                envelope_end: new Date(hubData.end.getTime() + (6 * 60 * 60 * 1000)).toISOString()
+            });
 
-            const eventsToLink = hubData.isRoutine ? routineEvents : activeEvents;
-
-            // We still use the RPC for the bulk update
-            const { error: linkError } = await supabase
-                .rpc('apply_hub_linkage', {
-                    p_user_id: userId,
-                    target_hub_id: hub.id,
-                    envelope_start: envelopeStart.toISOString(),
-                    envelope_end: envelopeEnd.toISOString()
-                });
-
-            if (linkError) throw linkError;
-            linkageCount++;
-
+            if (!linkError) linkageCount++;
         } catch (e) {
-            await logError(supabase, userId, `Failed to persist hub: ${hubData.title}`, e, { hubData });
+            await logError(supabase, userId, `Failed to persist sovereign hub: ${hubData.title}`, e);
         }
     }
 
@@ -307,26 +253,19 @@ export async function processContextHubs(userId: string) {
 }
 
 /**
- * Generate Integrity Report
+ * Relational Connectivity Report
  */
 export async function generateIntegrityReport(userId: string) {
     const supabase = await createServerSupabaseClient();
     try {
-        const { data: events, error } = await supabase
-            .from('calendar_events')
-            .select('id, metadata, hub_id')
-            .eq('user_id', userId);
-
-        if (error) throw error;
-        if (!events) return null;
-
-        const total = events.length;
-        const anchored = events.filter(e => e.hub_id).length;
+        const { data: hubs } = await supabase.from('context_hubs').select('metadata').eq('user_id', userId);
+        const totalPeople = new Set(hubs?.flatMap(h => h.metadata?.people || [])).size;
+        const totalOrgs = new Set(hubs?.flatMap(h => h.metadata?.orgs || [])).size;
 
         return {
-            total_events: total,
-            anchored_pct: (anchored / total) * 100,
-            status: anchored / total > 0.95 ? '99% Reality Aligned' : 'Recovery Active'
+            people_nodes: totalPeople,
+            organization_nodes: totalOrgs,
+            status: 'Sovereign Brain v6.0 Active'
         };
     } catch (e) {
         return null;
