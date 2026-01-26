@@ -41,7 +41,7 @@ export async function processContextHubs(userId: string) {
     console.log(`[Hub Engine] Processing ${events.length} events for user ${userId}`);
 
     // 2. Step 1: Anchor Detection
-    // Flights, Hotels, and All-Day events act as Primary Gravitational Hubs
+    // All anchors (Travel, Stay, or Dense Block) act as gravity wells
     const anchors: HubAnchor[] = events
         .filter(ev => {
             const metadata = ev.metadata || {};
@@ -52,78 +52,96 @@ export async function processContextHubs(userId: string) {
             title: ev.title,
             start: new Date(ev.start_at),
             end: new Date(ev.end_at),
-            type: (ev.metadata?.anchor_type === 'travel') ? 'travel' : 'anchor'
+            type: (ev.metadata?.anchor_type === 'travel' || ev.metadata?.anchor_type === 'all_day') ? 'travel' : 'anchor'
         }));
 
-    // 3. Step 2: Temporal Clustering
-    // Group travel anchors that are close together (e.g. Flight In -> Hotel -> Flight Out)
-    const travelHubs: { title: string; start: Date; end: Date; anchorIds: string[] }[] = [];
+    // 3. Step 2: Temporal Clustering & Fallback
+    const hubsToCreate: { title: string; type: string; start: Date; end: Date; anchorIds: string[] }[] = [];
 
-    let currentTravelHub: typeof travelHubs[0] | null = null;
-
+    // Group 1: Anchored Hubs (Travel/Stay primary)
+    let currentHub: typeof hubsToCreate[0] | null = null;
     anchors.forEach(anchor => {
-        if (anchor.type === 'travel') {
-            if (!currentTravelHub) {
-                currentTravelHub = {
-                    title: `Trip: ${anchor.title}`,
+        if (!currentHub) {
+            currentHub = {
+                title: anchor.type === 'travel' ? `Trip: ${anchor.title}` : `Focus: ${anchor.title}`,
+                type: anchor.type,
+                start: anchor.start,
+                end: anchor.end,
+                anchorIds: [anchor.eventId]
+            };
+        } else {
+            const gap = anchor.start.getTime() - currentHub.end.getTime();
+            // Group anchors within 5 days of each other into one context
+            if (gap < 5 * 24 * 60 * 60 * 1000) {
+                currentHub.end = anchor.end;
+                currentHub.anchorIds.push(anchor.eventId);
+            } else {
+                hubsToCreate.push(currentHub);
+                currentHub = {
+                    title: anchor.type === 'travel' ? `Trip: ${anchor.title}` : `Focus: ${anchor.title}`,
+                    type: anchor.type,
                     start: anchor.start,
                     end: anchor.end,
                     anchorIds: [anchor.eventId]
                 };
-            } else {
-                // If this travel anchor is within 14 days of the last one, expand the hub
-                const gap = anchor.start.getTime() - currentTravelHub.end.getTime();
-                if (gap < 14 * 24 * 60 * 60 * 1000) {
-                    currentTravelHub.end = anchor.end;
-                    currentTravelHub.anchorIds.push(anchor.eventId);
-                    // Update title if we find a destination city etc (future polish)
-                } else {
-                    travelHubs.push(currentTravelHub);
-                    currentTravelHub = {
-                        title: `Trip: ${anchor.title}`,
-                        start: anchor.start,
-                        end: anchor.end,
-                        anchorIds: [anchor.eventId]
-                    };
-                }
             }
         }
     });
-    if (currentTravelHub) travelHubs.push(currentTravelHub);
+    if (currentHub) hubsToCreate.push(currentHub);
+
+    // Group 2: Activity Gaps (Create "Contextual Pulses" for dense non-anchored periods)
+    const floatingEvents = events.filter(ev => !anchors.some(a => a.eventId === ev.id));
+    const dailyClusters: Record<string, any[]> = {};
+    floatingEvents.forEach(ev => {
+        const day = ev.start_at.split('T')[0];
+        if (!dailyClusters[day]) dailyClusters[day] = [];
+        dailyClusters[day].push(ev);
+    });
+
+    Object.entries(dailyClusters).forEach(([day, cluster]) => {
+        if (cluster.length >= 4) { // Dense activity cluster
+            const startStr = cluster[0].start_at;
+            const endStr = cluster[cluster.length - 1].end_at;
+            hubsToCreate.push({
+                title: `Pulse: ${day} activity`,
+                type: 'intent',
+                start: new Date(startStr),
+                end: new Date(endStr),
+                anchorIds: []
+            });
+        }
+    });
 
     // 4. Step 3: Persistence
-    // Create hubs in DB and link events
-    for (const hubData of travelHubs) {
+    for (const hubData of hubsToCreate) {
         const { data: hub, error: hubError } = await supabase
             .from('context_hubs')
             .upsert({
                 user_id: userId,
                 title: hubData.title,
-                type: 'travel',
+                type: hubData.type,
                 start_at: hubData.start.toISOString(),
                 end_at: hubData.end.toISOString(),
                 metadata: { anchors: hubData.anchorIds }
-            }, { onConflict: 'user_id, title, start_at' }) // Basic dedupe
+            }, { onConflict: 'user_id, title, start_at' })
             .select('id')
             .single();
 
-        if (hubError) {
-            console.error('[Hub Engine] Failed to create hub:', hubError);
-            continue;
-        }
+        if (hubError) continue;
 
-        // Link all events within this temporal envelope to the hub
-        const { error: linkError } = await supabase
+        // Link all events within this envelope (with a 6-hour buffer for arrival/departure events)
+        const envelopeStart = new Date(hubData.start.getTime() - (6 * 60 * 60 * 1000));
+        const envelopeEnd = new Date(hubData.end.getTime() + (6 * 60 * 60 * 1000));
+
+        await supabase
             .from('calendar_events')
             .update({ hub_id: hub.id })
             .eq('user_id', userId)
-            .gte('start_at', hubData.start.toISOString())
-            .lte('end_at', hubData.end.toISOString());
-
-        if (linkError) console.error('[Hub Engine] Failed to link events to hub:', linkError);
+            .gte('start_at', envelopeStart.toISOString())
+            .lte('end_at', envelopeEnd.toISOString());
     }
 
-    return travelHubs.length;
+    return hubsToCreate.length;
 }
 
 /**
