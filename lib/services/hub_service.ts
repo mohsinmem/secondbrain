@@ -29,6 +29,43 @@ async function logError(supabase: any, userId: string, message: string, error: a
     });
 }
 
+/**
+ * Semantic Labeling Helper
+ * Extracts recurring keywords from a cluster of event titles
+ */
+function deriveSemanticLabel(events: any[], date: string): string {
+    if (events.length === 0) return `Pulse: ${date} activity`;
+
+    // 1. Filter and normalize words
+    const STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'your', 'from', 'call', 'meeting', 'sync', 'daily', 'standup']);
+    const wordCounts: Record<string, number> = {};
+
+    // Only look at top 3 high-duration events for relevance
+    const topEvents = [...events]
+        .map(e => ({ title: e.title, duration: new Date(e.end_at).getTime() - new Date(e.start_at).getTime() }))
+        .sort((a, b) => b.duration - a.duration)
+        .slice(0, 3);
+
+    topEvents.forEach(e => {
+        const words = e.title.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/);
+        words.forEach((w: string) => {
+            if (w.length > 3 && !STOP_WORDS.has(w)) {
+                wordCounts[w] = (wordCounts[w] || 0) + 1;
+            }
+        });
+    });
+
+    // 2. Find most common keyword
+    const winners = Object.entries(wordCounts).sort((a, b) => b[1] - a[1]);
+
+    if (winners.length > 0 && winners[0][1] >= 2) {
+        const keyword = winners[0][0].charAt(0).toUpperCase() + winners[0][0].slice(1);
+        return `${keyword} Intensive: ${date}`;
+    }
+
+    return `Activity Pulse: ${date}`;
+}
+
 export async function processContextHubs(userId: string) {
     const supabase = await createServerSupabaseClient();
 
@@ -83,12 +120,13 @@ export async function processContextHubs(userId: string) {
     const hubsToCreate: { title: string; type: string; start: Date; end: Date; anchorIds: string[] }[] = [];
 
     try {
-        // Group 1: Anchored Hubs (Travel/Stay primary)
+        // Group 1: Anchored Hubs (SEMANTIC RE-LABELING: WO 5.11)
         let currentHub: typeof hubsToCreate[0] | null = null;
         anchors.forEach(anchor => {
             if (!currentHub) {
+                const prefix = anchor.type === 'travel' ? 'Stay at' : 'Focus on';
                 currentHub = {
-                    title: anchor.type === 'travel' ? `Trip: ${anchor.title}` : `Focus: ${anchor.title}`,
+                    title: `${prefix} ${anchor.title}`, // Prioritize Anchor Title
                     type: anchor.type,
                     start: anchor.start,
                     end: anchor.end,
@@ -99,10 +137,12 @@ export async function processContextHubs(userId: string) {
                 if (gap < 5 * 24 * 60 * 60 * 1000) {
                     currentHub.end = anchor.end;
                     currentHub.anchorIds.push(anchor.eventId);
+                    // Keep the first anchor as the primary title
                 } else {
                     hubsToCreate.push(currentHub);
+                    const prefix = anchor.type === 'travel' ? 'Stay at' : 'Focus on';
                     currentHub = {
-                        title: anchor.type === 'travel' ? `Trip: ${anchor.title}` : `Focus: ${anchor.title}`,
+                        title: `${prefix} ${anchor.title}`,
                         type: anchor.type,
                         start: anchor.start,
                         end: anchor.end,
@@ -113,7 +153,7 @@ export async function processContextHubs(userId: string) {
         });
         if (currentHub) hubsToCreate.push(currentHub);
 
-        // Group 2: Activity Gaps (Contextual Pulses)
+        // Group 2: Activity Gaps (HEURISTIC LABELING: WO 5.11)
         const floatingEvents = events.filter(ev => !anchors.some(a => a.eventId === ev.id));
         const dailyClusters: Record<string, any[]> = {};
         floatingEvents.forEach(ev => {
@@ -126,8 +166,9 @@ export async function processContextHubs(userId: string) {
             if (cluster.length >= 4) {
                 const startStr = cluster[0].start_at;
                 const endStr = cluster[cluster.length - 1].end_at;
+
                 hubsToCreate.push({
-                    title: `Pulse: ${day} activity`,
+                    title: deriveSemanticLabel(cluster, day),
                     type: 'intent',
                     start: new Date(startStr),
                     end: new Date(endStr),

@@ -270,6 +270,8 @@ export function LifeMapView() {
             ) : viewMode === 'swipe' ? (
                 <div className="max-w-md mx-auto">
                     <SwipeInterface
+                        hubId={activeHubId || undefined}
+                        hubTitle={hubs.find(h => h.id === activeHubId)?.title}
                         candidates={candidates}
                         onPromote={handlePromote}
                         onFinish={() => {

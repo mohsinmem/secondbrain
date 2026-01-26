@@ -13,6 +13,8 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Check, X, Info, BrainCircuit } from 'lucide-react';
 
+import { Input } from '@/components/ui/input';
+
 interface Candidate {
     eventId: string;
     title: string;
@@ -21,22 +23,40 @@ interface Candidate {
 }
 
 interface SwipeInterfaceProps {
+    hubId?: string;
+    hubTitle?: string;
     candidates: Candidate[];
     onFinish: () => void;
     onPromote: (eventId: string) => Promise<void>;
 }
 
-export function SwipeInterface({ candidates, onFinish, onPromote }: SwipeInterfaceProps) {
+export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromote }: SwipeInterfaceProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [history, setHistory] = useState<('promote' | 'dismiss')[]>([]);
     const [animating, setAnimating] = useState<'left' | 'right' | null>(null);
 
+    // Rename Logic
+    const [showRename, setShowRename] = useState(false);
+    const [newTitle, setNewTitle] = useState(hubTitle || '');
+    const [hubHasBeenRenamed, setHubHasBeenRenamed] = useState(false);
+    const [renaming, setRenaming] = useState(false);
+
     const currentCandidate = candidates[currentIndex];
 
     const handleAction = async (action: 'promote' | 'dismiss') => {
+        // SEMANTIC RE-LABELING: Only prompt on the first promotion for generic hubs
+        const isGeneric = hubTitle?.includes('Pulse') || hubTitle?.includes('Intensive') || hubTitle?.includes('activity');
+        if (action === 'promote' && isGeneric && !hubHasBeenRenamed && hubId) {
+            setShowRename(true);
+            return;
+        }
+
+        executeAction(action);
+    };
+
+    const executeAction = async (action: 'promote' | 'dismiss') => {
         setAnimating(action === 'promote' ? 'right' : 'left');
 
-        // Brief delay for animation
         setTimeout(async () => {
             if (action === 'promote') {
                 await onPromote(currentCandidate.eventId);
@@ -51,6 +71,26 @@ export function SwipeInterface({ candidates, onFinish, onPromote }: SwipeInterfa
                 onFinish();
             }
         }, 300);
+    };
+
+    const handleRename = async () => {
+        if (!hubId || !newTitle) return;
+        setRenaming(true);
+        try {
+            await fetch(`/api/hubs/${hubId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: newTitle })
+            });
+            setHubHasBeenRenamed(true);
+            setShowRename(false);
+            // Continue the promotion after rename
+            executeAction('promote');
+        } catch (error) {
+            console.error('Rename failed', error);
+        } finally {
+            setRenaming(false);
+        }
     };
 
     if (!currentCandidate) {
@@ -70,6 +110,33 @@ export function SwipeInterface({ candidates, onFinish, onPromote }: SwipeInterfa
 
     return (
         <div className="relative h-[600px] flex flex-col items-center justify-center p-4 overflow-hidden">
+            {/* Rename Modal (Directive: Manual Overwrite) */}
+            {showRename && (
+                <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-200">
+                    <Card className="w-full max-w-sm p-6 shadow-2xl border-blue-100 flex flex-col gap-4">
+                        <div className="space-y-1">
+                            <h3 className="font-bold text-gray-900">Name this Hub</h3>
+                            <p className="text-xs text-gray-500">Give this cluster a friendly, permanent name before promoting signals.</p>
+                        </div>
+                        <Input
+                            value={newTitle}
+                            onChange={(e) => setNewTitle(e.target.value)}
+                            placeholder="e.g. Bali Trip Nov 2025"
+                            className="bg-blue-50/30 border-blue-100"
+                            autoFocus
+                        />
+                        <div className="flex gap-2 pt-2">
+                            <Button variant="ghost" className="flex-1 text-gray-400" onClick={() => { setShowRename(false); executeAction('promote'); }}>
+                                Skip
+                            </Button>
+                            <Button className="flex-1 bg-blue-600 hover:bg-blue-700" onClick={handleRename} disabled={renaming}>
+                                {renaming ? 'Saving...' : 'Set Name'}
+                            </Button>
+                        </div>
+                    </Card>
+                </div>
+            )}
+
             {/* Progress Label */}
             <div className="absolute top-0 w-full text-center px-4 space-y-2">
                 <div className="flex justify-between text-[10px] font-bold text-gray-400 uppercase tracking-widest">
@@ -86,7 +153,7 @@ export function SwipeInterface({ candidates, onFinish, onPromote }: SwipeInterfa
 
             {/* Candidate Card */}
             <div className={`relative w-full max-w-sm transition-all duration-300 ${animating === 'right' ? 'translate-x-[200%] rotate-12 opacity-0' :
-                    animating === 'left' ? '-translate-x-[200%] -rotate-12 opacity-0' : ''
+                animating === 'left' ? '-translate-x-[200%] -rotate-12 opacity-0' : ''
                 }`}>
                 <Card className="p-8 shadow-xl border-gray-100 flex flex-col items-center text-center space-y-6">
                     <div className="bg-blue-50/50 p-4 rounded-full border border-blue-100">
