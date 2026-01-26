@@ -16,8 +16,8 @@ BEGIN
     UPDATE public.calendar_events
     SET hub_id = target_hub_id
     WHERE user_id = auth.uid()  -- VITAL: Preserve user isolation
-    AND start_at >= envelope_start
-    AND end_at <= envelope_end;
+    AND start_at AT TIME ZONE 'UTC' >= envelope_start AT TIME ZONE 'UTC'
+    AND end_at AT TIME ZONE 'UTC' <= envelope_end AT TIME ZONE 'UTC';
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

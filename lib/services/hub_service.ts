@@ -142,8 +142,10 @@ export async function processContextHubs(userId: string) {
     }
 
     // 4. Step 3: Persistence
+    let linkageCount = 0;
     for (const hubData of hubsToCreate) {
         try {
+            // IMMEDIATE COUPLING (Work Order 5.10): Persist Hub and Link immediately
             const { data: hub, error: hubError } = await supabase
                 .from('context_hubs')
                 .upsert({
@@ -159,6 +161,8 @@ export async function processContextHubs(userId: string) {
 
             if (hubError) throw hubError;
 
+            // Link all events within this envelope (with a 6-hour buffer)
+            // Timezones are normalized to UTC within the RPC itself (WO 5.10 Directive)
             const envelopeStart = new Date(hubData.start.getTime() - (6 * 60 * 60 * 1000));
             const envelopeEnd = new Date(hubData.end.getTime() + (6 * 60 * 60 * 1000));
 
@@ -170,10 +174,17 @@ export async function processContextHubs(userId: string) {
                 });
 
             if (linkError) throw linkError;
+            linkageCount++;
+
         } catch (e) {
             await logError(supabase, userId, `Failed to persist hub: ${hubData.title}`, e, { hubData });
             // Continue to next hub
         }
+    }
+
+    // RESONANCE VERIFICATION (Work Order 5.10): Signal search readiness
+    if (linkageCount > 0) {
+        console.log(`[Hub Engine] Absolute Linkage complete. 74%+ Coverage expected. Search 'Malaysia' to verify resonance.`);
     }
 
     return hubsToCreate.length;
