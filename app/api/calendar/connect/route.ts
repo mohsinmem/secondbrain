@@ -19,14 +19,20 @@ export async function GET(req: NextRequest) {
         }
 
         // Generate the Auth URL and redirect
+        // This will now throw a descriptive "Configuration Missing" error if env vars are not set
         const authUrl = getAuthUrl();
-
-        // We could store the user ID in a state parameter for extra security
-        // but for now we rely on the session in the callback.
 
         return NextResponse.redirect(authUrl);
     } catch (error: any) {
-        console.error('Connect error:', error);
+        console.error('[OAuth Connect Error]:', error.message);
+
+        if (error.message.includes('Configuration Missing')) {
+            return NextResponse.json({
+                error: 'Server Configuration Error',
+                details: error.message
+            }, { status: 500 });
+        }
+
         return NextResponse.json({ error: 'Failed to initiate connection' }, { status: 500 });
     }
 }

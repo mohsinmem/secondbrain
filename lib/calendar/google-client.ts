@@ -7,24 +7,50 @@
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
-const REDIRECT_URI = `${BASE_URL}/api/calendar/callback`;
+const REDIRECT_URI = `${BASE_URL.replace(/\/$/, '')}/api/calendar/callback`;
 
-if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
-    console.warn('Google OAuth credentials missing from environment variables.');
+/**
+ * Validate that all required Google OAuth environment variables are present.
+ * Throws a descriptive error if any are missing.
+ */
+export function validateConfig() {
+    const missing = [];
+    if (!GOOGLE_CLIENT_ID) missing.push('GOOGLE_CLIENT_ID');
+    if (!GOOGLE_CLIENT_SECRET) missing.push('GOOGLE_CLIENT_SECRET');
+    if (!process.env.NEXT_PUBLIC_BASE_URL) {
+        // We warn but don't strictly block if it's localhost, but for Netlify it's critical
+        if (process.env.NODE_ENV === 'production') {
+            missing.push('NEXT_PUBLIC_BASE_URL');
+        }
+    }
+
+    if (missing.length > 0) {
+        const error = `Configuration Missing: ${missing.join(', ')}`;
+        console.error(`[OAuth Audit] ${error}`);
+        console.error(`[OAuth Audit] Redirect URI expected in Google Console: ${REDIRECT_URI}`);
+        throw new Error(error);
+    }
+
+    return {
+        clientId: GOOGLE_CLIENT_ID!,
+        clientSecret: GOOGLE_CLIENT_SECRET!,
+        redirectUri: REDIRECT_URI
+    };
 }
 
 /**
  * Generate the Google Auth URL
  */
 export function getAuthUrl() {
+    const { clientId, redirectUri } = validateConfig();
     const scopes = [
         'https://www.googleapis.com/auth/calendar.readonly',
         'https://www.googleapis.com/auth/userinfo.email',
     ];
 
     const params = new URLSearchParams({
-        client_id: GOOGLE_CLIENT_ID!,
-        redirect_uri: REDIRECT_URI,
+        client_id: clientId,
+        redirect_uri: redirectUri,
         response_type: 'code',
         scope: scopes.join(' '),
         access_type: 'offline', // Required for refresh token
@@ -38,6 +64,7 @@ export function getAuthUrl() {
  * Exchange auth code for tokens
  */
 export async function exchangeCodeForTokens(code: string) {
+    const { clientId, clientSecret, redirectUri } = validateConfig();
     const res = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: {
@@ -45,9 +72,9 @@ export async function exchangeCodeForTokens(code: string) {
         },
         body: new URLSearchParams({
             code,
-            client_id: GOOGLE_CLIENT_ID!,
-            client_secret: GOOGLE_CLIENT_SECRET!,
-            redirect_uri: REDIRECT_URI,
+            client_id: clientId,
+            client_secret: clientSecret,
+            redirect_uri: redirectUri,
             grant_type: 'authorization_code',
         }),
     });
@@ -70,14 +97,15 @@ export async function exchangeCodeForTokens(code: string) {
  * Refresh the access token
  */
 export async function refreshAccessToken(refreshToken: string) {
+    const { clientId, clientSecret } = validateConfig();
     const res = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: new URLSearchParams({
-            client_id: GOOGLE_CLIENT_ID!,
-            client_secret: GOOGLE_CLIENT_SECRET!,
+            client_id: clientId,
+            client_secret: clientSecret,
             refresh_token: refreshToken,
             grant_type: 'refresh_token',
         }),

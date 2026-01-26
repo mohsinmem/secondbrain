@@ -7,7 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { exchangeCodeForTokens } from '@/lib/calendar/google-client';
+import { exchangeCodeForTokens, validateConfig } from '@/lib/calendar/google-client';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { syncGoogleCalendar } from '@/lib/services/calendar_sync';
 
@@ -31,6 +31,14 @@ export async function GET(req: NextRequest) {
 
         if (authError || !user) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        // 0. PRIVACY & AUDIT: Validate configuration before proceeding
+        // This ensures redirect_uri alignment and credential presence
+        try {
+            validateConfig();
+        } catch (configError: any) {
+            return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/settings/calendars?status=error&message=config_error&details=${encodeURIComponent(configError.message)}`);
         }
 
         // 1. Exchange code for tokens
