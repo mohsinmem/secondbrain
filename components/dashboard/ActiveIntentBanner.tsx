@@ -1,16 +1,28 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export function ActiveIntentBanner() {
     const searchParams = useSearchParams();
+    const router = useRouter();
     const intentId = searchParams.get('intent_id');
     const [intentQuery, setIntentQuery] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
+
+    const handleClear = () => {
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete('intent_id');
+        params.delete('intent_query');
+        params.delete('intent_card_type');
+        params.delete('start');
+        params.delete('week_end');
+        params.delete('event_count');
+        router.push(`?${params.toString()}`);
+    };
 
     useEffect(() => {
         if (!intentId) {
@@ -58,7 +70,15 @@ export function ActiveIntentBanner() {
                     )}
                 </span>
             </div>
-            {/* Future: Add 'Clear' or 'New Intent' button here if needed */}
+
+            <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClear}
+                className="text-xs h-7 px-2 text-gray-400 hover:text-red-500 transition-colors uppercase tracking-widest font-bold"
+            >
+                <X className="h-4 w-4 mr-1" /> Clear
+            </Button>
         </div>
     );
 }

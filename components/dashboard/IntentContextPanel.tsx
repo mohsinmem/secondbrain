@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 interface IntentContextPanelProps {
     intentType: 'forecast' | 'reflection';
@@ -18,7 +18,20 @@ export function IntentContextPanel({
     weekEnd,
     eventCount
 }: IntentContextPanelProps) {
+    const searchParams = useSearchParams();
+    const router = useRouter();
     const [dismissed, setDismissed] = React.useState(false);
+
+    const handleClearSession = () => {
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete('intent_id');
+        params.delete('intent_query');
+        params.delete('intent_card_type');
+        params.delete('start');
+        params.delete('week_end');
+        params.delete('event_count');
+        router.push(`?${params.toString()}`);
+    };
 
     if (dismissed) return null;
 
@@ -53,12 +66,20 @@ export function IntentContextPanel({
                             {intentQuery}
                         </span>
                     </div>
-                    <button
-                        onClick={() => setDismissed(true)}
-                        className="text-xs text-gray-400 hover:text-gray-600 uppercase tracking-wider font-medium"
-                    >
-                        Dismiss
-                    </button>
+                    <div className="flex gap-4">
+                        <button
+                            onClick={() => setDismissed(true)}
+                            className="text-xs text-gray-400 hover:text-gray-600 uppercase tracking-wider font-medium"
+                        >
+                            Dismiss
+                        </button>
+                        <button
+                            onClick={handleClearSession}
+                            className="text-xs text-blue-500 hover:text-blue-700 uppercase tracking-wider font-bold"
+                        >
+                            Clear Session
+                        </button>
+                    </div>
                 </div>
 
                 {/* Body - Primary sentence */}
