@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS public.context_hubs (
     metadata jsonb DEFAULT '{}'::jsonb,
     created_at timestamptz DEFAULT now(),
     
-    CONSTRAINT context_hubs_time_check CHECK (start_at <= end_at)
+    CONSTRAINT context_hubs_time_check CHECK (start_at <= end_at),
+    CONSTRAINT context_hubs_unique_entry UNIQUE (user_id, title, start_at)
 );
 
 CREATE INDEX IF NOT EXISTS idx_context_hubs_user ON public.context_hubs(user_id);

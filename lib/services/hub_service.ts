@@ -30,6 +30,14 @@ export async function processContextHubs(userId: string) {
         return;
     }
 
+    // 1.5. Clear existing hub links for a fresh run
+    const { error: clearError } = await supabase
+        .from('calendar_events')
+        .update({ hub_id: null })
+        .eq('user_id', userId);
+
+    if (clearError) console.error('[Hub Engine] Failed to clear old hub links:', clearError);
+
     console.log(`[Hub Engine] Processing ${events.length} events for user ${userId}`);
 
     // 2. Step 1: Anchor Detection
@@ -135,8 +143,19 @@ export async function generateIntegrityReport(userId: string) {
     const anchored = events.filter(e => e.hub_id).length;
     const floating = total - anchored;
 
-    // Primary Anchors recovered (that have metadata set but weren't in a hub before this run)
+    // Gap Analysis: Identify "High-Activity Gaps" (Periods without hubs)
+    const floatingEvents = events.filter(e => !e.hub_id);
     const primaryAnchors = events.filter(e => e.metadata?.is_anchor);
+    let gapsCount = 0;
+    if (floatingEvents.length > 0) {
+        // Group floating events by day and see where they cluster
+        const dailyPulse: Record<string, number> = {};
+        floatingEvents.forEach(e => {
+            const day = e.metadata?.start_at?.split('T')[0] || 'Unknown';
+            dailyPulse[day] = (dailyPulse[day] || 0) + 1;
+        });
+        gapsCount = Object.values(dailyPulse).filter(count => count > 3).length;
+    }
 
     return {
         total_events: total,
@@ -145,6 +164,8 @@ export async function generateIntegrityReport(userId: string) {
             anchored_pct: (anchored / total) * 100,
             floating_pct: (floating / total) * 100
         },
-        gap_analysis: "Scanning high-activity windows without travel anchors..."
+        gap_analysis: gapsCount > 0
+            ? `Detected ${gapsCount} clusters of activity missing orientation anchors.`
+            : "No significant coverage gaps identified."
     };
 }
