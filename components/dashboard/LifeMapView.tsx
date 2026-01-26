@@ -50,9 +50,11 @@ export function LifeMapView() {
     const [linkingContext, setLinkingContext] = useState<{ sourceEventId: string; signalId: string } | null>(null);
     const [mounted, setMounted] = useState(false);
 
-    // Read URL params for deep-linking
+    // Read URL params for deep-linking and filtering
     const searchParams = useSearchParams();
     const startParam = searchParams.get('start');
+    const intentQuery = searchParams.get('intent_query');
+    const [showFiltered, setShowFiltered] = useState(true); // Default to filtered view when intent is active
 
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const weekRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
@@ -103,10 +105,31 @@ export function LifeMapView() {
         return weekStart.toLocaleDateString([], { month: 'short', day: '2-digit' });
     }
 
+    // Intent-based filtering logic (Tiered: Location > Title > Attendees)
+    const filteredEvents = useMemo(() => {
+        if (!intentQuery || !showFiltered) return events;
+
+        const lowerQuery = intentQuery.toLowerCase();
+
+        return events.filter(ev => {
+            // Tier 1: Location match (highest confidence)
+            if (ev.location?.toLowerCase().includes(lowerQuery)) return true;
+
+            // Tier 2: Title match
+            if (ev.title.toLowerCase().includes(lowerQuery)) return true;
+
+            // Tier 3: Attendee match
+            if (ev.attendees?.some((a: string) => a.toLowerCase().includes(lowerQuery))) return true;
+
+            return false;
+        });
+    }, [events, intentQuery, showFiltered]);
+
     const eventsByWeek = useMemo(() => {
         const groups = new Map<string, { weekStart: Date; items: CalendarEvent[] }>();
+        const sourceEvents = intentQuery && showFiltered ? filteredEvents : events;
 
-        for (const ev of events) {
+        for (const ev of sourceEvents) {
             const start = new Date(ev.start_at);
             const wk = startOfWeek(start);
             const key = wk.toISOString().slice(0, 10); // YYYY-MM-DD (week start)
@@ -125,7 +148,7 @@ export function LifeMapView() {
             });
 
         return sorted;
-    }, [events]);
+    }, [events, filteredEvents, intentQuery, showFiltered]);
 
     useEffect(() => {
         if (!scrollContainerRef.current) return;
@@ -435,6 +458,28 @@ export function LifeMapView() {
                     <span className="text-[10px] text-gray-400 font-medium uppercase tracking-[0.1em] bg-gray-50/50 px-3 py-1 rounded-full border border-gray-100">
                         Vertical spacing reflects layout only — not importance.
                     </span>
+                </div>
+            )}
+
+            {/* Focus Toggle Banner - Shows when Intent is active */}
+            {projection === 'list' && intentQuery && (
+                <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-3 mb-4">
+                    <div className="flex items-center justify-between">
+                        <span className="text-sm text-gray-700">
+                            {showFiltered
+                                ? `Showing ${filteredEvents.length} relevant events`
+                                : `Showing all ${events.length} events`
+                            }
+                        </span>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShowFiltered(!showFiltered)}
+                            className="text-xs"
+                        >
+                            {showFiltered ? 'Expand to show all' : 'Focus on relevant'}
+                        </Button>
+                    </div>
                 </div>
             )}
 

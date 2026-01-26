@@ -11,6 +11,7 @@
 
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { parseICS, validateICSFileSize, validateICSFormat } from '@/lib/calendar/ics-parser';
+import { scrubEventsPII } from '@/lib/middleware/pii_scrubber';
 import { NextRequest, NextResponse } from 'next/server';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -128,8 +129,11 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // 6. Insert events (with deduplication via ON CONFLICT)
-        const eventsToInsert = parseResult.events.map(event => ({
+        // 6. PRIVACY GUARD: Scrub PII from events before storage
+        const scrubbedEvents = scrubEventsPII(parseResult.events);
+
+        // 7. Insert events (with deduplication via ON CONFLICT)
+        const eventsToInsert = scrubbedEvents.map(event => ({
             user_id: user.id,
             source_id: calendarSource.id,
             external_event_id: event.external_event_id,
