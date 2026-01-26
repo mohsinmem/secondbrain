@@ -15,18 +15,21 @@
  * Each pattern is designed to be conservative (prefer false positives over false negatives)
  */
 const PII_PATTERNS = {
-    // Video conferencing links - Redact only the password/token parameters for privacy, keep base URL for context
+    // Video conferencing links - Redact only the password/token parameters
     zoom_links: /(\?pwd=[^\s"']+)/gi,
     meet_links: /(\?authuser=[^\s"']+)/gi,
-    teams_links: /(threadId=[^\s"']+)/gi, // Example of specific parameter scrubbing
+    teams_links: /(threadId=[^\s"']+)/gi,
 
-    // Passwords and passcodes
+    // Passwords, passcodes, and confirmation numbers
+    // Note: We use surgical regex to avoid redacting hotel names or airlines
     passwords: /password[:\s]+[\w!@#$%^&*]+/gi,
     passcodes: /passcode[:\s]+[\w!@#$%^&*]+/gi,
     pins: /\bpin[:\s]+\d{4,}/gi,
 
+    // Confirmation numbers (typically 6-12 digit alphanumeric codes near key terms)
+    confirmations: /\b(?:confirmation|conf|booking|ticket)[:\s]*([A-Z0-9]{6,12})\b/gi,
+
     // API keys and tokens (Look for high-entropy strings or common prefixes)
-    // Matches 32+ char alphanumeric strings that HAVE numbers AND mixed casing (indicating high entropy)
     api_keys: /\b(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]{32,}\b/g,
 } as const;
 

@@ -68,6 +68,7 @@ export async function syncGoogleCalendar(sourceId: string, lookbackDays: number 
             attendees: gEvent.attendees?.map((a: any) => a.email) || null,
             description: gEvent.description || null,
             raw_payload: gEvent,
+            metadata: {} as any, // Initialize metadata for anchor tagging
         };
 
         // MANDATORY: Scrub PII before storage
@@ -79,12 +80,25 @@ export async function syncGoogleCalendar(sourceId: string, lookbackDays: number 
         }
 
         // Prepare semantic payload for future vector search (Phase 4.4.5)
-        // We include title, scrubbed description, and PRESERVED location
         const semanticString = `Title: ${scrubbed.title}\nLocation: ${scrubbed.location || 'N/A'}\nDescription: ${scrubbed.description || ''}`;
+
+        // Anchor Detection Logic (Work Order 5)
+        const isAllDay = !gEvent.start?.dateTime;
+        const lowerTitle = scrubbed.title.toLowerCase();
+        const isTravelAnchor = lowerTitle.includes('flight') ||
+            lowerTitle.includes('hotel') ||
+            lowerTitle.includes('stay at') ||
+            lowerTitle.includes('airbnb') ||
+            lowerTitle.includes('check-in') ||
+            lowerTitle.includes('booking');
 
         return {
             ...scrubbed,
-            // semantic_payload: semanticString, // Could add this to DB if needed
+            metadata: {
+                ...(scrubbed.metadata || {}),
+                is_anchor: isTravelAnchor || isAllDay,
+                anchor_type: isTravelAnchor ? 'travel' : (isAllDay ? 'all_day' : null)
+            }
         };
     });
 

@@ -39,12 +39,6 @@ export function Header() {
                 Dashboard
               </Link>
               <Link
-                href="/inbox"
-                className="text-sm font-medium text-gray-700 hover:text-gray-900"
-              >
-                Inbox
-              </Link>
-              <Link
                 href="/contacts"
                 className="text-sm font-medium text-gray-700 hover:text-gray-900"
               >

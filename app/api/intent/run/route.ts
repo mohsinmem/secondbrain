@@ -62,60 +62,23 @@ export async function POST(req: NextRequest) {
             }
         });
 
-        // 3. Generate Reflection Card (Tiered Search: Exact -> Fuzzy -> Density)
-        let matchEvents: any[] = [];
-        let searchMode: 'exact' | 'fuzzy' | 'density' = 'exact';
+        // 3. Generate Reflection Card using Resonance Search (Work Order 5)
+        // We use the new search_resonance RPC which prioritizes Hubs
+        const { data: resonanceMatches, error: resonanceError } = await supabase
+            .rpc('search_resonance', {
+                query_text: query,
+                threshold: 0.1
+            });
 
-        // A. Tier 1: Exact Keyword Match (Expanded to Description)
-        const { data: exactMatch } = await supabase
-            .from('calendar_events')
-            .select('id, start_at')
-            .eq('user_id', user.id)
-            .or(`title.ilike.%${query}%,location.ilike.%${query}%,description.ilike.%${query}%`)
-            .order('start_at', { ascending: false })
-            .limit(50);
-
-        if (exactMatch && exactMatch.length > 0) {
-            matchEvents = exactMatch;
-            searchMode = 'exact';
-            console.log(`[Intent Search] Exact match found for: "${query}" (Field: T/L/D)`);
-        } else {
-            // B. Tier 2: Fuzzy Similarity Search
-            const { data: fuzzyMatch, error: fuzzyError } = await supabase
-                .rpc('search_calendar_events_fuzzy', {
-                    query_text: query,
-                    threshold: 0.2
-                });
-
-            if (fuzzyMatch && fuzzyMatch.length > 0) {
-                matchEvents = fuzzyMatch;
-                searchMode = 'fuzzy';
-                console.log(`[Intent Search] Fuzzy match found for: "${query}" (threshold: 0.2)`);
-            } else {
-                // Tier 2b: "Wide Net" Fallback
-                const { data: wideMatch } = await supabase
-                    .rpc('search_calendar_events_fuzzy', {
-                        query_text: query,
-                        threshold: 0.1
-                    });
-
-                if (wideMatch && wideMatch.length > 0) {
-                    matchEvents = wideMatch;
-                    searchMode = 'fuzzy';
-                    console.log(`[Intent Search] Wide-net fuzzy match found for: "${query}" (threshold: 0.1)`);
-                } else {
-                    if (fuzzyError) console.error('[Intent Search] Fuzzy RPC error:', fuzzyError);
-                    searchMode = 'density';
-                    console.log(`[Intent Search] No matches found for: "${query}". Falling back to density.`);
-                }
-            }
-        }
+        if (resonanceError) console.error('[Intent Search] Resonance RPC error:', resonanceError);
 
         let reflectionCard = null;
+        const matchEvents = resonanceMatches || [];
 
         if (matchEvents.length > 0) {
-            // Find the most relevant week (week of the most recent match)
-            const taxonomyDate = new Date(matchEvents[0].start_at);
+            // Take the best match (Hub or Event)
+            const bestMatch = matchEvents[0];
+            const taxonomyDate = new Date(bestMatch.result_start_at);
             const rDay = taxonomyDate.getDay();
             const rDiff = (rDay === 0 ? -6 : 1) - rDay;
             const rMonday = new Date(taxonomyDate);
@@ -126,13 +89,14 @@ export async function POST(req: NextRequest) {
             reflectionCard = {
                 intent_id: intent.id,
                 type: 'reflection',
-                title: searchMode === 'exact'
-                    ? `Past period: Related to "${query}"`
-                    : `Past period: Similar to "${query}" (Fuzzy Match)`,
+                title: bestMatch.result_type === 'hub'
+                    ? `Contextual Hub: "${bestMatch.result_title}"`
+                    : `Past period: Related to "${query}"`,
                 payload_json: {
                     version: 'v1',
-                    search_mode: searchMode,
+                    search_mode: 'resonance',
                     match_count: matchEvents.length,
+                    best_match_type: bestMatch.result_type,
                     window: {
                         start: rMonday.toISOString(),
                         end: rEnd.toISOString()
@@ -140,7 +104,7 @@ export async function POST(req: NextRequest) {
                 }
             };
         } else {
-            // C. Tier 3: Fallback: Recent Density (Last 90 days)
+            // C. Fallback: Recent Density (Last 90 days)
             const ninetyDaysAgo = new Date();
             ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
 
