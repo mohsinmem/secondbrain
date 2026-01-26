@@ -9,6 +9,8 @@ import { EventDetailPanel } from '@/components/events/EventDetailPanel';
 import { TimelineView } from './TimelineView';
 import { ActiveIntentBanner } from './ActiveIntentBanner';
 import { IntentContextPanel } from './IntentContextPanel';
+import { FocusToggle } from './FocusToggle';
+import { RefreshCw, LayoutList, Calendar as CalendarIcon, Info } from 'lucide-react';
 
 interface SignalEdge {
     id: string;
@@ -462,25 +464,14 @@ export function LifeMapView() {
             )}
 
             {/* Focus Toggle Banner - Shows when Intent is active */}
-            {projection === 'list' && intentQuery && (
-                <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-3 mb-4">
-                    <div className="flex items-center justify-between">
-                        <span className="text-sm text-gray-700">
-                            {showFiltered
-                                ? `Showing ${filteredEvents.length} relevant events`
-                                : `Showing all ${events.length} events`
-                            }
-                        </span>
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setShowFiltered(!showFiltered)}
-                            className="text-xs"
-                        >
-                            {showFiltered ? 'Expand to show all' : 'Focus on relevant'}
-                        </Button>
-                    </div>
-                </div>
+            {projection === 'list' && (
+                <FocusToggle
+                    showFiltered={showFiltered}
+                    setShowFiltered={setShowFiltered}
+                    filteredCount={filteredEvents.length}
+                    totalCount={events.length}
+                    intentQuery={intentQuery || ''}
+                />
             )}
 
             {projection === 'timeline' ? (
@@ -542,10 +533,43 @@ export function LifeMapView() {
                     </div>
 
                     {/* Simple Timeline View (Canonical List) */}
-                    <Card className="p-0 overflow-hidden">
+                    <Card className="p-0 overflow-hidden bg-white">
                         <div className="">
-                            {events.length === 0 ? (
-                                <p className="text-gray-500 text-center py-8">No events found</p>
+                            {eventsByWeek.length === 0 ? (
+                                <div className="text-center py-16 px-4 space-y-6">
+                                    <div className="flex justify-center">
+                                        <div className="bg-gray-50 p-4 rounded-full border border-gray-100">
+                                            {intentQuery && showFiltered ? (
+                                                <Info className="h-8 w-8 text-blue-400" />
+                                            ) : (
+                                                <CalendarIcon className="h-8 w-8 text-gray-300" />
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2 max-w-sm mx-auto">
+                                        <h3 className="text-lg font-semibold text-gray-900">
+                                            {intentQuery && showFiltered ? "0 events match your filters" : "No events found"}
+                                        </h3>
+                                        <p className="text-sm text-gray-500 leading-relaxed">
+                                            {intentQuery && showFiltered
+                                                ? `We found ${events.length} total events, but none match your current focus on "${intentQuery}".`
+                                                : "There are no events scheduled in your connected calendars for the chosen period."}
+                                        </p>
+                                    </div>
+
+                                    {intentQuery && showFiltered && (
+                                        <div className="pt-4">
+                                            <Button
+                                                variant="outline"
+                                                onClick={() => setShowFiltered(false)}
+                                                className="shadow-sm border-blue-100 text-blue-600 hover:bg-blue-50"
+                                            >
+                                                Show All {events.length} Events
+                                            </Button>
+                                        </div>
+                                    )}
+                                </div>
                             ) : (
                                 <div ref={scrollContainerRef} className="max-h-[700px] overflow-y-auto custom-scrollbar">
                                     {eventsByWeek.map((group) => {

@@ -71,7 +71,21 @@ export async function syncGoogleCalendar(sourceId: string, lookbackDays: number 
         };
 
         // MANDATORY: Scrub PII before storage
-        return scrubEventPII(eventData);
+        const scrubbed = scrubEventPII(eventData);
+
+        // Audit: Log if scrubbing occurred (Safe: only log that it happened)
+        if (eventData.description && eventData.description !== scrubbed.description) {
+            console.log(`[PII Audit] Scrubbed sensitive content from event: ${eventData.external_event_id}`);
+        }
+
+        // Prepare semantic payload for future vector search (Phase 4.4.5)
+        // We include title, scrubbed description, and PRESERVED location
+        const semanticString = `Title: ${scrubbed.title}\nLocation: ${scrubbed.location || 'N/A'}\nDescription: ${scrubbed.description || ''}`;
+
+        return {
+            ...scrubbed,
+            // semantic_payload: semanticString, // Could add this to DB if needed
+        };
     });
 
     // 6. Batch Insert with Deduplication (UPSERT)

@@ -62,23 +62,60 @@ export async function POST(req: NextRequest) {
             }
         });
 
-        // 3. Generate Reflection Card (Search or Density)
-        // A. Try Keyword Match
-        // We'll search titles and locations. 
-        // Note: Simple 'ilike' query.
-        const { data: matchEvents } = await supabase
+        // 3. Generate Reflection Card (Tiered Search: Exact -> Fuzzy -> Density)
+        let matchEvents: any[] = [];
+        let searchMode: 'exact' | 'fuzzy' | 'density' = 'exact';
+
+        // A. Tier 1: Exact Keyword Match
+        const { data: exactMatch } = await supabase
             .from('calendar_events')
             .select('start_at')
             .eq('user_id', user.id)
             .or(`title.ilike.%${query}%,location.ilike.%${query}%`)
             .order('start_at', { ascending: false })
-            .limit(50); // Scan recent matches
+            .limit(20);
+
+        if (exactMatch && exactMatch.length > 0) {
+            matchEvents = exactMatch;
+            searchMode = 'exact';
+            console.log(`[Intent Search] Exact match found for: "${query}"`);
+        } else {
+            // B. Tier 2: Fuzzy Similarity Search (The "Vector Search" analogue)
+            // Uses pg_trgm similarity threshold of 0.2 (Boosted recall for Phase 4.4.6)
+            const { data: fuzzyMatch, error: fuzzyError } = await supabase
+                .rpc('search_calendar_events_fuzzy', {
+                    query_text: query,
+                    threshold: 0.2
+                });
+
+            if (fuzzyMatch && fuzzyMatch.length > 0) {
+                matchEvents = fuzzyMatch;
+                searchMode = 'fuzzy';
+                console.log(`[Intent Search] Fuzzy match found for: "${query}" (threshold: 0.2)`);
+            } else {
+                // Tier 2b: "Wide Net" Fallback (Threshold 0.1) for very resilient recall
+                const { data: wideMatch } = await supabase
+                    .rpc('search_calendar_events_fuzzy', {
+                        query_text: query,
+                        threshold: 0.1
+                    });
+
+                if (wideMatch && wideMatch.length > 0) {
+                    matchEvents = wideMatch;
+                    searchMode = 'fuzzy'; // Still fuzzy but lower threshold
+                    console.log(`[Intent Search] Wide-net fuzzy match found for: "${query}" (threshold: 0.1)`);
+                } else {
+                    if (fuzzyError) console.error('[Intent Search] Fuzzy RPC error:', fuzzyError);
+                    searchMode = 'density';
+                    console.log(`[Intent Search] No matches found for: "${query}". Falling back to density.`);
+                }
+            }
+        }
 
         let reflectionCard = null;
 
-        if (matchEvents && matchEvents.length > 0) {
-            // Find the most relevant week (simplest: week of the most recent match)
-            // Or grouping? Let's take the most recent match for v0.
+        if (matchEvents.length > 0) {
+            // Find the most relevant week (week of the most recent match)
             const taxonomyDate = new Date(matchEvents[0].start_at);
             const rDay = taxonomyDate.getDay();
             const rDiff = (rDay === 0 ? -6 : 1) - rDay;
@@ -90,9 +127,12 @@ export async function POST(req: NextRequest) {
             reflectionCard = {
                 intent_id: intent.id,
                 type: 'reflection',
-                title: `Past period: Related to "${query}"`,
+                title: searchMode === 'exact'
+                    ? `Past period: Related to "${query}"`
+                    : `Past period: Similar to "${query}" (Fuzzy Match)`,
                 payload_json: {
                     version: 'v1',
+                    search_mode: searchMode,
                     window: {
                         start: rMonday.toISOString(),
                         end: rEnd.toISOString()
@@ -100,9 +140,7 @@ export async function POST(req: NextRequest) {
                 }
             };
         } else {
-            // B. Fallback: Recent Density (Last 90 days)
-            // We need to find a dense week. 
-            // For now, let's fetch events from last 90 days and aggregate in memory (simplest for v0).
+            // C. Tier 3: Fallback: Recent Density (Last 90 days)
             const ninetyDaysAgo = new Date();
             ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
 

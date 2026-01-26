@@ -20,6 +20,7 @@ export async function POST(req: NextRequest) {
 
         const { searchParams } = new URL(req.url);
         const sourceId = searchParams.get('source_id');
+        const force = searchParams.get('force') === 'true';
 
         if (!sourceId) {
             return NextResponse.json({ error: 'Missing source_id' }, { status: 400 });
@@ -41,10 +42,13 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Sync only supported for Google sources' }, { status: 400 });
         }
 
+        console.log(`[Manual Sync] Triggering sync for source ${sourceId} (Force: ${force})`);
+
         // Run sync (default 90 days lookback)
+        // Note: The syncGoogleCalendar function handles upserts naturally via external_event_id conflict.
         const count = await syncGoogleCalendar(source.id, 90);
 
-        return NextResponse.json({ success: true, count });
+        return NextResponse.json({ success: true, count, forced: force });
 
     } catch (error: any) {
         console.error('Manual sync error:', error);

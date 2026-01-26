@@ -15,19 +15,19 @@
  * Each pattern is designed to be conservative (prefer false positives over false negatives)
  */
 const PII_PATTERNS = {
-    // Video conferencing links
-    zoom_links: /https?:\/\/([a-z0-9-]+\.)?zoom\.us\/j\/\d+(\?pwd=[^\s]+)?/gi,
-    meet_links: /https?:\/\/meet\.google\.com\/[a-z-]+/gi,
-    teams_links: /https?:\/\/teams\.microsoft\.com\/l\/meetup-join\/[^\s]+/gi,
-    webex_links: /https?:\/\/([a-z0-9-]+\.)?webex\.com\/meet\/[^\s]+/gi,
+    // Video conferencing links - Redact only the password/token parameters for privacy, keep base URL for context
+    zoom_links: /(\?pwd=[^\s"']+)/gi,
+    meet_links: /(\?authuser=[^\s"']+)/gi,
+    teams_links: /(threadId=[^\s"']+)/gi, // Example of specific parameter scrubbing
 
     // Passwords and passcodes
     passwords: /password[:\s]+[\w!@#$%^&*]+/gi,
     passcodes: /passcode[:\s]+[\w!@#$%^&*]+/gi,
     pins: /\bpin[:\s]+\d{4,}/gi,
 
-    // API keys and tokens (generic long alphanumeric strings)
-    api_keys: /\b[A-Za-z0-9]{32,}\b/g,
+    // API keys and tokens (Look for high-entropy strings or common prefixes)
+    // Matches 32+ char alphanumeric strings that HAVE numbers AND mixed casing (indicating high entropy)
+    api_keys: /\b(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]{32,}\b/g,
 } as const;
 
 /**
@@ -58,8 +58,8 @@ export function scrubEventPII<T extends { description?: string | null; location?
     return {
         ...event,
         description: event.description ? scrubPII(event.description) : event.description,
-        // Note: We don't scrub location as it's structural data, not PII
-        // Location like "Zoom" or "Google Meet" is metadata, not a sensitive link
+        // MANDATORY AUDIT (Phase 4.4.6): Process location for PII while preserving semantic context
+        location: event.location ? scrubPII(event.location) : event.location,
     };
 }
 
