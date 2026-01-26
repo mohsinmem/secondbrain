@@ -66,22 +66,21 @@ export async function POST(req: NextRequest) {
         let matchEvents: any[] = [];
         let searchMode: 'exact' | 'fuzzy' | 'density' = 'exact';
 
-        // A. Tier 1: Exact Keyword Match
+        // A. Tier 1: Exact Keyword Match (Expanded to Description)
         const { data: exactMatch } = await supabase
             .from('calendar_events')
-            .select('start_at')
+            .select('id, start_at')
             .eq('user_id', user.id)
-            .or(`title.ilike.%${query}%,location.ilike.%${query}%`)
+            .or(`title.ilike.%${query}%,location.ilike.%${query}%,description.ilike.%${query}%`)
             .order('start_at', { ascending: false })
-            .limit(20);
+            .limit(50);
 
         if (exactMatch && exactMatch.length > 0) {
             matchEvents = exactMatch;
             searchMode = 'exact';
-            console.log(`[Intent Search] Exact match found for: "${query}"`);
+            console.log(`[Intent Search] Exact match found for: "${query}" (Field: T/L/D)`);
         } else {
-            // B. Tier 2: Fuzzy Similarity Search (The "Vector Search" analogue)
-            // Uses pg_trgm similarity threshold of 0.2 (Boosted recall for Phase 4.4.6)
+            // B. Tier 2: Fuzzy Similarity Search
             const { data: fuzzyMatch, error: fuzzyError } = await supabase
                 .rpc('search_calendar_events_fuzzy', {
                     query_text: query,
@@ -93,7 +92,7 @@ export async function POST(req: NextRequest) {
                 searchMode = 'fuzzy';
                 console.log(`[Intent Search] Fuzzy match found for: "${query}" (threshold: 0.2)`);
             } else {
-                // Tier 2b: "Wide Net" Fallback (Threshold 0.1) for very resilient recall
+                // Tier 2b: "Wide Net" Fallback
                 const { data: wideMatch } = await supabase
                     .rpc('search_calendar_events_fuzzy', {
                         query_text: query,
@@ -102,7 +101,7 @@ export async function POST(req: NextRequest) {
 
                 if (wideMatch && wideMatch.length > 0) {
                     matchEvents = wideMatch;
-                    searchMode = 'fuzzy'; // Still fuzzy but lower threshold
+                    searchMode = 'fuzzy';
                     console.log(`[Intent Search] Wide-net fuzzy match found for: "${query}" (threshold: 0.1)`);
                 } else {
                     if (fuzzyError) console.error('[Intent Search] Fuzzy RPC error:', fuzzyError);
@@ -133,6 +132,7 @@ export async function POST(req: NextRequest) {
                 payload_json: {
                     version: 'v1',
                     search_mode: searchMode,
+                    match_count: matchEvents.length,
                     window: {
                         start: rMonday.toISOString(),
                         end: rEnd.toISOString()

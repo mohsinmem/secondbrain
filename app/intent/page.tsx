@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ interface IntentCard {
     title: string;
     payload_json: {
         version: string;
+        match_count?: number;
         window: {
             start: string;
             end: string;
@@ -62,7 +63,6 @@ export default function IntentPage() {
     };
 
     const handleFeedback = async (cardId: string, action: 'save' | 'dismiss') => {
-        // UI Optimistic update
         if (action === 'dismiss') {
             setDismissedIds(prev => new Set(prev).add(cardId));
         }
@@ -79,23 +79,22 @@ export default function IntentPage() {
     };
 
     const handleNavigate = (card: IntentCard) => {
-        // Contract A: Start must be MONDAY (local timezone)
         const startISO = card.payload_json.window.start;
         const endISO = card.payload_json.window.end;
-        const startDate = startISO.split('T')[0]; // simple YYYY-MM-DD
+        const startDate = startISO.split('T')[0];
         const endDate = endISO.split('T')[0];
 
-        // Navigate with full context metadata for orientation panel
-        const intentQuery = intentId ? `&intent_id=${intentId}` : '';
-        const contextParams = `&intent_card_type=${card.type}&intent_query=${encodeURIComponent(query)}&week_end=${endDate}&event_count=0`;
-        router.push(`/dashboard?mode=list${intentQuery}&start=${startDate}${contextParams}`);
+        const count = card.payload_json.match_count || 0;
+
+        const intentQueryParam = intentId ? `&intent_id=${intentId}` : '';
+        const contextParams = `&intent_card_type=${card.type}&intent_query=${encodeURIComponent(query)}&week_end=${endDate}&event_count=${count}`;
+        router.push(`/dashboard?mode=list${intentQueryParam}&start=${startDate}${contextParams}`);
     };
 
     return (
         <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
             <div className="w-full max-w-lg space-y-8">
 
-                {/* Header / Input Section */}
                 <div className="text-center space-y-6">
                     <h1 className="text-2xl font-light text-gray-800 tracking-tight">
                         What's top of mind right now?
@@ -126,7 +125,6 @@ export default function IntentPage() {
                     )}
                 </div>
 
-                {/* Results Grid */}
                 {resultCards.length > 0 && (
                     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
                         <div className="text-xs font-medium text-gray-400 uppercase tracking-widest text-center mb-2">
@@ -162,6 +160,11 @@ export default function IntentPage() {
                                                     {new Date(card.payload_json.window.start).toLocaleDateString()} — {new Date(card.payload_json.window.end).toLocaleDateString()}
                                                 </span>
                                             </div>
+                                            {card.payload_json.match_count !== undefined && (
+                                                <div className="text-[11px] text-blue-500 font-bold mt-1">
+                                                    {card.payload_json.match_count} relevant events found
+                                                </div>
+                                            )}
                                         </CardContent>
                                     </div>
                                     <CardFooter className="pt-0 pb-3 px-4 flex justify-end gap-2 border-t border-gray-50 mt-2">
@@ -189,7 +192,6 @@ export default function IntentPage() {
                     </div>
                 )}
 
-                {/* Fallback Link */}
                 <div className="text-center pt-8">
                     <Button
                         variant="ghost"
