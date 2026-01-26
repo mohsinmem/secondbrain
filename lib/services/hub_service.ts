@@ -31,12 +31,10 @@ export async function processContextHubs(userId: string) {
     }
 
     // 1.5. Clear existing hub links for a fresh run
-    const { error: clearError } = await supabase
-        .from('calendar_events')
-        .update({ hub_id: null })
-        .eq('user_id', userId);
+    // PHYSICS REPAIR (Work Order 5.7): Call SECURITY DEFINER RPC to bypass RLS
+    const { error: clearError } = await supabase.rpc('clear_hub_linkage');
 
-    if (clearError) console.error('[Hub Engine] Failed to clear old hub links:', clearError);
+    if (clearError) console.error('[Hub Engine] Failed to clear old hub links via RPC:', clearError);
 
     console.log(`[Hub Engine] Processing ${events.length} events for user ${userId}`);
 
@@ -133,12 +131,15 @@ export async function processContextHubs(userId: string) {
         const envelopeStart = new Date(hubData.start.getTime() - (6 * 60 * 60 * 1000));
         const envelopeEnd = new Date(hubData.end.getTime() + (6 * 60 * 60 * 1000));
 
-        await supabase
-            .from('calendar_events')
-            .update({ hub_id: hub.id })
-            .eq('user_id', userId)
-            .gte('start_at', envelopeStart.toISOString())
-            .lte('end_at', envelopeEnd.toISOString());
+        // PHYSICS REPAIR (Work Order 5.7): Call SECURITY DEFINER RPC to bypass RLS
+        const { error: linkError } = await supabase
+            .rpc('apply_hub_linkage', {
+                target_hub_id: hub.id,
+                envelope_start: envelopeStart.toISOString(),
+                envelope_end: envelopeEnd.toISOString()
+            });
+
+        if (linkError) console.error('[Hub Engine] Failed to link events via RPC:', linkError);
     }
 
     return hubsToCreate.length;
