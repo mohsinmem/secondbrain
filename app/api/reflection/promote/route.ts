@@ -14,10 +14,10 @@ export async function POST(req: NextRequest) {
 
         if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-        const { event_id, metadata = {} } = await req.json();
+        const { event_id, metadata = {}, attributes = [] } = await req.json();
         if (!event_id) return NextResponse.json({ error: 'Missing event_id' }, { status: 400 });
 
-        const result = await promoteToSignal(user.id, event_id, metadata);
+        const result = await promoteToSignal(user.id, event_id, metadata, attributes);
 
         if (result.error) throw result.error;
 

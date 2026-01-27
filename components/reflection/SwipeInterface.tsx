@@ -27,13 +27,18 @@ interface SwipeInterfaceProps {
     hubTitle?: string;
     candidates: Candidate[];
     onFinish: () => void;
-    onPromote: (eventId: string) => Promise<void>;
+    onPromote: (eventId: string, attributes: string[]) => Promise<void>;
 }
 
 export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromote }: SwipeInterfaceProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [history, setHistory] = useState<('promote' | 'dismiss')[]>([]);
     const [animating, setAnimating] = useState<'left' | 'right' | null>(null);
+
+    // Wisdom Attributes (Work Order 6.1)
+    const [attributes, setAttributes] = useState<string[]>([]);
+    const [newAttribute, setNewAttribute] = useState('');
+    const SUGGESTIONS = ['TaskUs', 'Mapletree', 'PSDC', 'Family', 'Sana', 'AFERR', 'Strategic'];
 
     // Rename Logic
     const [showRename, setShowRename] = useState(false);
@@ -43,8 +48,13 @@ export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromot
 
     const currentCandidate = candidates[currentIndex];
 
+    // Reset attributes when candidate changes
+    useEffect(() => {
+        setAttributes([]);
+        setNewAttribute('');
+    }, [currentIndex]);
+
     const handleAction = async (action: 'promote' | 'dismiss') => {
-        // SEMANTIC RE-LABELING: Only prompt on the first promotion for generic hubs
         const isGeneric = hubTitle?.includes('Pulse') || hubTitle?.includes('Intensive') || hubTitle?.includes('activity');
         if (action === 'promote' && isGeneric && !hubHasBeenRenamed && hubId) {
             setShowRename(true);
@@ -54,12 +64,26 @@ export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromot
         executeAction(action);
     };
 
+    const toggleAttribute = (attr: string) => {
+        if (attributes.includes(attr)) {
+            setAttributes(attributes.filter(a => a !== attr));
+        } else {
+            setAttributes([...attributes, attr]);
+        }
+    };
+
+    const addCustomAttribute = () => {
+        if (!newAttribute || attributes.includes(newAttribute)) return;
+        setAttributes([...attributes, newAttribute]);
+        setNewAttribute('');
+    };
+
     const executeAction = async (action: 'promote' | 'dismiss') => {
         setAnimating(action === 'promote' ? 'right' : 'left');
 
         setTimeout(async () => {
             if (action === 'promote') {
-                await onPromote(currentCandidate.eventId);
+                await onPromote(currentCandidate.eventId, attributes);
             }
 
             setHistory([...history, action]);
@@ -84,7 +108,6 @@ export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromot
             });
             setHubHasBeenRenamed(true);
             setShowRename(false);
-            // Continue the promotion after rename
             executeAction('promote');
         } catch (error) {
             console.error('Rename failed', error);
@@ -109,8 +132,8 @@ export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromot
     const progress = ((currentIndex + 1) / candidates.length) * 100;
 
     return (
-        <div className="relative h-[600px] flex flex-col items-center justify-center p-4 overflow-hidden">
-            {/* Rename Modal (Directive: Manual Overwrite) */}
+        <div className="relative h-[650px] flex flex-col items-center justify-center p-4 overflow-hidden">
+            {/* Rename Modal */}
             {showRename && (
                 <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-200">
                     <Card className="w-full max-w-sm p-6 shadow-2xl border-blue-100 flex flex-col gap-4">
@@ -170,9 +193,46 @@ export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromot
                         </div>
                     </div>
 
-                    <p className="text-sm text-gray-600 leading-relaxed px-4">
-                        Should this event be promoted to your permanent Wisdom Layer as a Signal?
-                    </p>
+                    <div className="w-full space-y-4">
+                        <p className="text-xs text-gray-500 font-bold uppercase tracking-widest">
+                            Add Wisdom Attributes
+                        </p>
+
+                        {/* THE WISDOM GATE: Suggestion Chips */}
+                        <div className="flex flex-wrap justify-center gap-2">
+                            {SUGGESTIONS.map(tag => (
+                                <button
+                                    key={tag}
+                                    onClick={() => toggleAttribute(tag)}
+                                    className={`px-3 py-1 rounded-full text-[10px] font-bold transition-all border ${attributes.includes(tag)
+                                            ? 'bg-blue-500 text-white border-blue-500'
+                                            : 'bg-white text-gray-400 border-gray-100 hover:border-blue-200'
+                                        }`}
+                                >
+                                    {tag}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Custom Attribute Input */}
+                        <div className="flex gap-2">
+                            <Input
+                                value={newAttribute}
+                                onChange={(e) => setNewAttribute(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && addCustomAttribute()}
+                                placeholder="Add custom attribute..."
+                                className="h-8 text-xs bg-gray-50/50 border-gray-100 focus:ring-0"
+                            />
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 px-2 text-[10px] font-bold uppercase text-blue-500"
+                                onClick={addCustomAttribute}
+                            >
+                                Add
+                            </Button>
+                        </div>
+                    </div>
                 </Card>
             </div>
 
@@ -195,7 +255,6 @@ export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromot
                 </button>
             </div>
 
-            {/* Swiper Guidance */}
             <div className="absolute bottom-0 text-[10px] font-bold text-gray-300 uppercase tracking-widest pb-4">
                 Swipe or Tap to Categorize
             </div>

@@ -79,20 +79,41 @@ export async function generateReflectionCandidates(hubId: string) {
 /**
  * Promote an event to a Signal (Cognition Layer)
  */
-export async function promoteToSignal(userId: string, eventId: string, metadata: any = {}) {
+export async function promoteToSignal(userId: string, eventId: string, metadata: any = {}, attributes: string[] = []) {
     const supabase = await createServerSupabaseClient();
 
-    // Fetch original event for context
+    // 1. Fetch original event for context (includes hub_id)
     const { data: event } = await supabase
         .from('calendar_events')
-        .select('*')
+        .select('*, hub_id')
         .eq('id', eventId)
         .single();
 
     if (!event) return { error: 'Event not found' };
 
-    // Create signal in public.signals (Phase 5 Cognition Layer)
-    // Note: Assuming 'signals' table exists from earlier phases or WO 5 spec
+    // 2. Persist Wisdom to the Hub (Direct Persistence)
+    if (event.hub_id && attributes.length > 0) {
+        const { data: hub } = await supabase
+            .from('context_hubs')
+            .select('relational_metadata')
+            .eq('id', event.hub_id)
+            .single();
+
+        const existingMetadata = Array.isArray(hub?.relational_metadata) ? hub.relational_metadata : [];
+        const updatedMetadata = Array.from(new Set([...existingMetadata, ...attributes]));
+
+        await supabase
+            .from('context_hubs')
+            .update({ relational_metadata: updatedMetadata })
+            .eq('id', event.hub_id);
+
+        // 3. TRIGGER WISDOM PROPAGATION (Work Order 6.1)
+        // Dynamically import to avoid circular dependency
+        const { propagateWisdom } = await import('./hub_service');
+        await propagateWisdom(userId, attributes, event.title);
+    }
+
+    // 4. Create signal in public.signals (Phase 5 Cognition Layer)
     const { data: signal, error } = await supabase
         .from('signals')
         .insert({
@@ -104,6 +125,7 @@ export async function promoteToSignal(userId: string, eventId: string, metadata:
                 ...metadata,
                 start_at: event.start_at,
                 location: event.location,
+                wisdom_attributes: attributes
             }
         })
         .select()

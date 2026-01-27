@@ -277,6 +277,55 @@ export async function processContextHubs(userId: string) {
 }
 
 /**
+ * Wisdom Propagation Engine (Work Order 6.1)
+ * Propagates manual attributes across the corpus based on fuzzy matching.
+ */
+export async function propagateWisdom(userId: string, attributes: string[], sourceTitle: string) {
+    const supabase = await createServerSupabaseClient();
+
+    // 1. Identify high-salience keyword from source (e.g. 'Sana')
+    // We'll use the first word that isn't a stopword or generic.
+    const words = sourceTitle.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/);
+    const keyword = words.find(w => w.length > 3 && !['sync', 'meeting', 'review', 'call', 'with'].includes(w));
+
+    if (!keyword) return;
+
+    console.log(`[Wisdom Propagation] Scanning corpus for keyword: ${keyword}`);
+
+    // 2. Find all events matching the keyword
+    const { data: matchingEvents } = await supabase
+        .from('calendar_events')
+        .select('hub_id')
+        .eq('user_id', userId)
+        .ilike('title', `%${keyword}%`);
+
+    if (!matchingEvents || matchingEvents.length === 0) return;
+
+    const hubIds = Array.from(new Set(matchingEvents.map(e => e.hub_id).filter(id => !!id)));
+
+    if (hubIds.length === 0) return;
+
+    // 3. Update all related hubs with the new attributes
+    for (const hubId of hubIds) {
+        const { data: hub } = await supabase
+            .from('context_hubs')
+            .select('relational_metadata')
+            .eq('id', hubId)
+            .single();
+
+        const existing = Array.isArray(hub?.relational_metadata) ? hub.relational_metadata : [];
+        const merged = Array.from(new Set([...existing, ...attributes]));
+
+        await supabase
+            .from('context_hubs')
+            .update({ relational_metadata: merged })
+            .eq('id', hubId);
+    }
+
+    console.log(`[Wisdom Propagation] Successfully wised up ${hubIds.length} hubs.`);
+}
+
+/**
  * Relational Connectivity Report
  */
 export async function generateIntegrityReport(userId: string) {

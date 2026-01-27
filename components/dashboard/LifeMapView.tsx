@@ -94,12 +94,15 @@ export function LifeMapView() {
         }
     }
 
-    async function handlePromote(eventId: string) {
+    async function handlePromote(eventId: string, attributes: string[] = []) {
         try {
             await fetch('/api/reflection/promote', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ event_id: eventId })
+                body: JSON.stringify({
+                    event_id: eventId,
+                    attributes: attributes
+                })
             });
         } catch (error) {
             console.error('Promote failed', error);
