@@ -17,7 +17,7 @@ interface Candidate {
 export async function generateReflectionCandidates(hubId: string) {
     const supabase = await createServerSupabaseClient();
 
-    // 1. Fetch Hub and its events
+    // 1. Fetch Hub and its events (Filter out already processed ones)
     const { data: hub } = await supabase
         .from('context_hubs')
         .select('*')
@@ -26,12 +26,25 @@ export async function generateReflectionCandidates(hubId: string) {
 
     if (!hub) return [];
 
+    // Filter out:
+    // 1. Explicitly dismissed events
+    // 2. Events that are already part of a signal
     const { data: events } = await supabase
         .from('calendar_events')
         .select('*')
-        .eq('hub_id', hubId);
+        .eq('hub_id', hubId)
+        .is('dismissed_at', null);
 
     if (!events) return [];
+
+    // Further precision: Check signals table for processed events
+    const { data: existingSignals } = await supabase
+        .from('signals')
+        .select('source_event_id')
+        .eq('user_id', hub.user_id);
+
+    const processedEventIds = new Set(existingSignals?.map(s => s.source_event_id) || []);
+    const unProcessedEvents = events.filter(e => !processedEventIds.has(e.id));
 
     // 2. Weights Matrix
     const WEIGHTS = {
@@ -41,7 +54,7 @@ export async function generateReflectionCandidates(hubId: string) {
     };
 
     // 3. Candidate Generation Logic
-    const candidates: Candidate[] = events.map(ev => {
+    const candidates: Candidate[] = unProcessedEvents.map(ev => {
         let weight = WEIGHTS.ASSOCIATIVE_PULSE;
         let reason = 'Contextual occurrence';
 
@@ -132,4 +145,19 @@ export async function promoteToSignal(userId: string, eventId: string, metadata:
         .single();
 
     return { signal, error };
+}
+
+/**
+ * Permanently dismiss an event as noise
+ */
+export async function dismissEvent(userId: string, eventId: string) {
+    const supabase = await createServerSupabaseClient();
+
+    const { error } = await supabase
+        .from('calendar_events')
+        .update({ dismissed_at: new Date().toISOString() })
+        .eq('id', eventId)
+        .eq('user_id', userId);
+
+    return { error };
 }

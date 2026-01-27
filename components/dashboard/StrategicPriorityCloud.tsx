@@ -19,7 +19,7 @@ interface KeywordWeight {
     weight: number;
 }
 
-export function StrategicPriorityCloud({ onClose }: { onClose: () => void }) {
+export function StrategicPriorityCloud({ onClose, onSave }: { onClose: () => void, onSave: () => Promise<void> }) {
     const [weights, setWeights] = useState<KeywordWeight[]>([
         { keyword: 'TaskUs', weight: 50 },
         { keyword: 'Mapletree', weight: 50 },
@@ -68,6 +68,10 @@ export function StrategicPriorityCloud({ onClose }: { onClose: () => void }) {
             });
 
             if (error) throw error;
+
+            // 2. TRIGGER REAL-TIME RE-CLUSTERING
+            await onSave();
+
             onClose();
         } catch (error) {
             console.error('Failed to save priorities', error);

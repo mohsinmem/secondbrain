@@ -1,18 +1,17 @@
 /**
- * Swipe Interface Component (Work Order 5)
+ * Swipe Interface Component (Work Order 6.2.5)
  * 
  * A mobile-first, touch-responsive UI for signal promotion.
+ * Left Swipe -> Permanently Dismiss as Noise
  * Right Swipe -> Promote to Wisdom (Signal)
- * Left Swipe -> Dismiss as Noise
  */
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Check, X, Info, BrainCircuit } from 'lucide-react';
-
 import { Input } from '@/components/ui/input';
 
 interface Candidate {
@@ -28,14 +27,19 @@ interface SwipeInterfaceProps {
     candidates: Candidate[];
     onFinish: () => void;
     onPromote: (eventId: string, attributes: string[]) => Promise<void>;
+    onDismiss: (eventId: string) => Promise<void>;
 }
 
-export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromote }: SwipeInterfaceProps) {
+export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromote, onDismiss }: SwipeInterfaceProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
-    const [history, setHistory] = useState<('promote' | 'dismiss')[]>([]);
     const [animating, setAnimating] = useState<'left' | 'right' | null>(null);
 
-    // Wisdom Attributes (Work Order 6.1)
+    // Gesture State
+    const [dragX, setDragX] = useState(0);
+    const [isDragging, setIsDragging] = useState(false);
+    const startXRef = useRef(0);
+
+    // Wisdom Attributes
     const [attributes, setAttributes] = useState<string[]>([]);
     const [newAttribute, setNewAttribute] = useState('');
     const SUGGESTIONS = ['TaskUs', 'Mapletree', 'PSDC', 'Family', 'Sana', 'AFERR', 'Strategic'];
@@ -48,11 +52,38 @@ export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromot
 
     const currentCandidate = candidates[currentIndex];
 
-    // Reset attributes when candidate changes
     useEffect(() => {
         setAttributes([]);
         setNewAttribute('');
     }, [currentIndex]);
+
+    // --- GESTURE LISTENERS ---
+
+    const onPointerDown = (e: React.PointerEvent) => {
+        if (showRename) return;
+        setIsDragging(true);
+        startXRef.current = e.clientX;
+    };
+
+    const onPointerMove = (e: React.PointerEvent) => {
+        if (!isDragging || showRename) return;
+        const diff = e.clientX - startXRef.current;
+        setDragX(diff);
+    };
+
+    const onPointerUp = () => {
+        if (!isDragging || showRename) return;
+        setIsDragging(false);
+
+        const THRESHOLD = 100;
+        if (dragX > THRESHOLD) {
+            handleAction('promote');
+        } else if (dragX < -THRESHOLD) {
+            handleAction('dismiss');
+        } else {
+            setDragX(0); // Snap back to center
+        }
+    };
 
     const handleAction = async (action: 'promote' | 'dismiss') => {
         const isGeneric = hubTitle?.includes('Pulse') || hubTitle?.includes('Intensive') || hubTitle?.includes('activity');
@@ -60,8 +91,32 @@ export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromot
             setShowRename(true);
             return;
         }
-
         executeAction(action);
+    };
+
+    const executeAction = async (action: 'promote' | 'dismiss') => {
+        setAnimating(action === 'promote' ? 'right' : 'left');
+        setDragX(action === 'promote' ? 500 : -500); // Fly off screen
+
+        setTimeout(async () => {
+            if (action === 'promote') {
+                const finalAttributes = [...attributes];
+                if (newAttribute && !finalAttributes.includes(newAttribute)) {
+                    finalAttributes.push(newAttribute);
+                }
+                await onPromote(currentCandidate.eventId, finalAttributes);
+            } else {
+                await onDismiss(currentCandidate.eventId);
+            }
+
+            setDragX(0);
+            setAnimating(null);
+            if (currentIndex < candidates.length - 1) {
+                setCurrentIndex(currentIndex + 1);
+            } else {
+                onFinish();
+            }
+        }, 300);
     };
 
     const toggleAttribute = (attr: string) => {
@@ -76,25 +131,6 @@ export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromot
         if (!newAttribute || attributes.includes(newAttribute)) return;
         setAttributes([...attributes, newAttribute]);
         setNewAttribute('');
-    };
-
-    const executeAction = async (action: 'promote' | 'dismiss') => {
-        setAnimating(action === 'promote' ? 'right' : 'left');
-
-        setTimeout(async () => {
-            if (action === 'promote') {
-                await onPromote(currentCandidate.eventId, attributes);
-            }
-
-            setHistory([...history, action]);
-            setAnimating(null);
-
-            if (currentIndex < candidates.length - 1) {
-                setCurrentIndex(currentIndex + 1);
-            } else {
-                onFinish();
-            }
-        }, 300);
     };
 
     const handleRename = async () => {
@@ -131,11 +167,20 @@ export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromot
 
     const progress = ((currentIndex + 1) / candidates.length) * 100;
 
+    // UI Visuals: Rotation and Opacity based on drag
+    const rotation = dragX / 20;
+    const opacity = 1 - Math.abs(dragX) / 400;
+
     return (
-        <div className="relative h-[650px] flex flex-col items-center justify-center p-4 overflow-hidden">
+        <div
+            className="relative h-[650px] flex flex-col items-center justify-center p-4 overflow-hidden touch-none"
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerLeave={onPointerUp}
+        >
             {/* Rename Modal */}
             {showRename && (
-                <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-200">
+                <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-sm flex items-center justify-center p-6">
                     <Card className="w-full max-w-sm p-6 shadow-2xl border-blue-100 flex flex-col gap-4">
                         <div className="space-y-1">
                             <h3 className="font-bold text-gray-900">Name this Hub</h3>
@@ -175,15 +220,20 @@ export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromot
             </div>
 
             {/* Candidate Card */}
-            <div className={`relative w-full max-w-sm transition-all duration-300 ${animating === 'right' ? 'translate-x-[200%] rotate-12 opacity-0' :
-                animating === 'left' ? '-translate-x-[200%] -rotate-12 opacity-0' : ''
-                }`}>
-                <Card className="p-8 shadow-xl border-gray-100 flex flex-col items-center text-center space-y-6">
-                    <div className="bg-blue-50/50 p-4 rounded-full border border-blue-100">
+            <div
+                className="relative w-full max-w-sm cursor-grab active:cursor-grabbing transition-transform duration-100"
+                style={{
+                    transform: `translateX(${dragX}px) rotate(${rotation}deg)`,
+                    opacity: animating ? 0 : opacity
+                }}
+                onPointerDown={onPointerDown}
+            >
+                <Card className="p-8 shadow-xl border-gray-100 flex flex-col items-center text-center space-y-6 bg-white shrink-0 select-none">
+                    <div className="bg-blue-50/50 p-4 rounded-full border border-blue-100 pointer-events-none">
                         <BrainCircuit className="h-10 w-10 text-blue-500" />
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-2 pointer-events-none">
                         <h2 className="text-xl font-bold text-gray-900 leading-tight">
                             {currentCandidate.title}
                         </h2>
@@ -198,9 +248,8 @@ export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromot
                             Add Wisdom Attributes
                         </p>
 
-                        {/* THE WISDOM GATE: Suggestion Chips */}
                         <div className="flex flex-wrap justify-center gap-2">
-                            {SUGGESTIONS.map(tag => (
+                            {Array.from(new Set([...SUGGESTIONS, ...attributes])).map(tag => (
                                 <button
                                     key={tag}
                                     onClick={() => toggleAttribute(tag)}
@@ -214,7 +263,6 @@ export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromot
                             ))}
                         </div>
 
-                        {/* Custom Attribute Input */}
                         <div className="flex gap-2">
                             <Input
                                 value={newAttribute}
@@ -234,6 +282,16 @@ export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromot
                         </div>
                     </div>
                 </Card>
+
+                {/* Gesture Indicators */}
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-between px-6">
+                    <div className="opacity-0 transition-opacity" style={{ opacity: dragX < -50 ? Math.min(1, Math.abs(dragX) / 200) : 0 }}>
+                        <X className="h-20 w-20 text-red-500/20" />
+                    </div>
+                    <div className="opacity-0 transition-opacity" style={{ opacity: dragX > 50 ? Math.min(1, Math.abs(dragX) / 200) : 0 }}>
+                        <Check className="h-20 w-20 text-green-500/20" />
+                    </div>
+                </div>
             </div>
 
             {/* Controls */}
@@ -256,7 +314,7 @@ export function SwipeInterface({ hubId, hubTitle, candidates, onFinish, onPromot
             </div>
 
             <div className="absolute bottom-0 text-[10px] font-bold text-gray-300 uppercase tracking-widest pb-4">
-                Swipe or Tap to Categorize
+                Swipe left/right or use buttons
             </div>
         </div>
     );

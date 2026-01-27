@@ -21,6 +21,13 @@ const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
     ({ className, defaultValue, max = 100, min = 0, step = 1, onValueChange, disabled, ...props }, ref) => {
         const [value, setValue] = React.useState(defaultValue?.[0] || 0);
 
+        // SYNC: Update internal state when defaultValue changed from outside (e.g. after fetch)
+        React.useEffect(() => {
+            if (defaultValue && defaultValue[0] !== undefined) {
+                setValue(defaultValue[0]);
+            }
+        }, [defaultValue]);
+
         const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
             const newValue = parseInt(e.target.value, 10);
             setValue(newValue);

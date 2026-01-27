@@ -82,22 +82,30 @@ export async function syncGoogleCalendar(sourceId: string, lookbackDays: number 
         // Prepare semantic payload for future vector search (Phase 4.4.5)
         const semanticString = `Title: ${scrubbed.title}\nLocation: ${scrubbed.location || 'N/A'}\nDescription: ${scrubbed.description || ''}`;
 
-        // Anchor Detection Logic (Work Order 5)
+        // Anchor Detection Logic (Work Order 5/6 Refined)
         const isAllDay = !gEvent.start?.dateTime;
         const lowerTitle = scrubbed.title.toLowerCase();
-        const isTravelAnchor = lowerTitle.includes('flight') ||
-            lowerTitle.includes('hotel') ||
+
+        const isTransit = lowerTitle.includes('flight') ||
+            lowerTitle.includes('train') ||
+            lowerTitle.includes('bus') ||
+            lowerTitle.includes('transit');
+
+        const isAccommodation = lowerTitle.includes('hotel') ||
             lowerTitle.includes('stay at') ||
             lowerTitle.includes('airbnb') ||
             lowerTitle.includes('check-in') ||
+            lowerTitle.includes('check in') ||
             lowerTitle.includes('booking');
+
+        const isTravelAnchor = isTransit || isAccommodation;
 
         return {
             ...scrubbed,
             metadata: {
                 ...(scrubbed.metadata || {}),
                 is_anchor: isTravelAnchor || isAllDay,
-                anchor_type: isTravelAnchor ? 'travel' : (isAllDay ? 'all_day' : null)
+                anchor_type: isAccommodation ? 'accommodation' : (isTransit ? 'transit' : (isAllDay ? 'all_day' : null))
             }
         };
     });

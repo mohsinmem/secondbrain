@@ -9,7 +9,7 @@ interface HubAnchor {
     title: string;
     start: Date;
     end: Date;
-    type: 'travel' | 'project' | 'anchor' | 'strategic';
+    type: 'accommodation' | 'transit' | 'event' | 'project' | 'anchor' | 'strategic';
     location?: string;
     keywords?: string[];
 }
@@ -110,11 +110,13 @@ function detectCollision(hubEntities: { orgs: string[] }, hubTitle: string, weig
 
 /**
  * Semantic Salience Helper (With Multi-Intent Disambiguation)
+ * 
+ * Directive: Sovereign Naming (No more "Stay at Flight")
  */
 function deriveSovereignTitle(events: any[], anchors: HubAnchor[], superAnchors: string[], weights: Record<string, number>): string {
-    // 1. SUPER-ANCHORS
+    // 1. SUPER-ANCHORS (High-Weight Strategic)
     if (superAnchors.length > 0) {
-        const primary = superAnchors[0];
+        const primary = superAnchors[0]; // Already sorted by weight
         if (primary === 'TaskUs') return `TaskUs Strategic Engagement`;
         if (primary === 'Philippines' || primary === 'Manila') return `Philippines Facilitation (Evivve)`;
         if (primary === 'Bangkok') return `Bangkok Strategic Sync`;
@@ -131,11 +133,17 @@ function deriveSovereignTitle(events: any[], anchors: HubAnchor[], superAnchors:
         }
     }
 
-    // 3. ANCHOR FIRST
+    // 3. ANCHOR FIRST (Refined Naming)
     if (anchors.length > 0) {
         const primary = anchors[0];
-        const prefix = primary.type === 'travel' ? 'Stay at' : 'Focus on';
-        return `${prefix} ${primary.title}`;
+
+        // Smarter Prefixes
+        if (primary.type === 'accommodation') return `Stay at ${primary.title}`;
+        if (primary.type === 'transit') return primary.title; // Flight to Bangkok
+        if (primary.type === 'event') return primary.title;   // Charu Gupta's Birthday
+        if (primary.type === 'strategic') return `${primary.title} Engagement`;
+
+        return primary.title;
     }
 
     return "Requires Intent";
@@ -171,14 +179,24 @@ export async function processContextHubs(userId: string) {
     // 4. Initial Anchors (Gravity Wells)
     const anchors: HubAnchor[] = activeEvents
         .filter(ev => ev.metadata?.is_anchor === true)
-        .map(ev => ({
-            eventId: ev.id,
-            title: ev.title,
-            start: new Date(ev.start_at),
-            end: new Date(ev.end_at),
-            type: (ev.metadata?.anchor_type === 'travel' || ev.metadata?.anchor_type === 'all_day') ? 'travel' : 'anchor',
-            location: ev.location
-        }));
+        .map(ev => {
+            const anchorType = ev.metadata?.anchor_type;
+            let type: HubAnchor['type'] = 'anchor';
+
+            if (anchorType === 'accommodation') type = 'accommodation';
+            else if (anchorType === 'transit') type = 'transit';
+            else if (anchorType === 'all_day') type = 'event';
+            else if (anchorType === 'travel') type = 'accommodation'; // Back-compat
+
+            return {
+                eventId: ev.id,
+                title: ev.title,
+                start: new Date(ev.start_at),
+                end: new Date(ev.end_at),
+                type,
+                location: ev.location
+            };
+        });
 
     // 5. Clustering Loop
     const hubsPrepared: any[] = [];

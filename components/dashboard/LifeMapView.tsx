@@ -94,6 +94,18 @@ export function LifeMapView() {
         }
     }
 
+    async function handleDismiss(eventId: string) {
+        try {
+            await fetch('/api/reflection/dismiss', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ event_id: eventId })
+            });
+        } catch (error) {
+            console.error('Dismiss failed', error);
+        }
+    }
+
     async function handlePromote(eventId: string, attributes: string[] = []) {
         try {
             await fetch('/api/reflection/promote', {
@@ -316,7 +328,10 @@ export function LifeMapView() {
 
             {/* Strategic Priority Cloud Overlay */}
             {showPriorityCloud && (
-                <StrategicPriorityCloud onClose={() => setShowPriorityCloud(false)} />
+                <StrategicPriorityCloud
+                    onClose={() => setShowPriorityCloud(false)}
+                    onSave={() => handleReprocess(false)}
+                />
             )}
 
             {/* Main Content Area */}
@@ -361,6 +376,7 @@ export function LifeMapView() {
                         hubTitle={hubs.find(h => h.id === activeHubId)?.title}
                         candidates={candidates}
                         onPromote={handlePromote}
+                        onDismiss={handleDismiss}
                         onFinish={() => {
                             setViewMode('hubs');
                             setActiveHubId(null);
