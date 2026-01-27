@@ -152,9 +152,13 @@ function deriveSovereignTitle(events: any[], anchors: HubAnchor[], superAnchors:
 export async function processContextHubs(userId: string) {
     const supabase = await createServerSupabaseClient();
 
-    // 1. Fetch Events, Transcripts & Strategic Weights
+    // 1. Fetch Events, Transcripts & Strategic Weights (Exclude Dismissed Noise)
     const [{ data: events }, { data: transcripts }, { data: priorityData }] = await Promise.all([
-        supabase.from('calendar_events').select('*').eq('user_id', userId).order('start_at', { ascending: true }),
+        supabase.from('calendar_events')
+            .select('*')
+            .eq('user_id', userId)
+            .is('dismissed_at', null) // DIRECTIVE: Ignore noise
+            .order('start_at', { ascending: true }),
         supabase.from('raw_conversations').select('*').eq('user_id', userId),
         supabase.from('keyword_priorities').select('keyword, weight').eq('user_id', userId)
     ]);

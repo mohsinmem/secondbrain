@@ -101,6 +101,8 @@ export function LifeMapView() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ event_id: eventId })
             });
+            // DIRECTIVE: Re-calculate hubs in real-time to remove cleared anchors
+            await handleReprocess(false);
         } catch (error) {
             console.error('Dismiss failed', error);
         }
